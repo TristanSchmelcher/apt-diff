@@ -40,10 +40,9 @@ _REPORT_UNVERIFIABLE = "report-unverifiable"
 _TEMPDIR = "tempdir"
 
 _USAGE = """
-Usage: apt-check [OPTION]... [PATH|PACKAGE]...
+Usage: apt-diff [OPTION]... [PATH|PACKAGE]...
 
-Check filesystem content against the APT installation sources and display any
-discrepancies as a diff.
+Diff filesystem content against the APT installation sources.
 
 Options:
     --package       -p <name>          Check the named package.
@@ -109,7 +108,7 @@ def _launch_pipeline(apt_helper, tree, extraction_dir):
           os.fdopen(apt_fetcher_in_write, "w"),
           os.fdopen(differ_out_read, "r"))
 
-class AptCheck:
+class AptDiff:
   __CHECK_PATH = 0
   __CHECK_PACKAGE = 1
 
@@ -134,16 +133,16 @@ class AptCheck:
 
   def check_path(self, path):
     normpath = os.path.normpath(os.path.join(os.getcwd(), path))
-    self.__actions.append((AptCheck.__CHECK_PATH, normpath))
+    self.__actions.append((AptDiff.__CHECK_PATH, normpath))
 
   def check_package(self, pkgname):
-    self.__actions.append((AptCheck.__CHECK_PACKAGE, pkgname))
+    self.__actions.append((AptDiff.__CHECK_PACKAGE, pkgname))
 
   def execute(self):
     time1 = time.time()
     # Build the list of paths that we care about and load a file tree for them.
     paths = [
-        arg for action, arg in self.__actions if AptCheck.__CHECK_PATH == action
+        arg for action, arg in self.__actions if AptDiff.__CHECK_PATH == action
     ]
     if len(paths) > 0:
       # At least one path check requested, so we need to load by path.
@@ -163,7 +162,7 @@ class AptCheck:
     # but apt_fetcher_process needs them in the main tree so that it knows which
     # package to fetch for their files.
     for action, arg in self.__actions:
-      if AptCheck.__CHECK_PACKAGE == action:
+      if AptDiff.__CHECK_PACKAGE == action:
         self.__tree.load_files_for_pkgname(arg)
     self.__apt_helper = apt_helper.AptHelper()
     # Start our processing pipeline.
@@ -176,9 +175,9 @@ class AptCheck:
       print "Warning: no actions specified. This is a no-op."
     else:
       for action, arg in self.__actions:
-        if AptCheck.__CHECK_PATH == action:
+        if AptDiff.__CHECK_PATH == action:
           self.__do_check_path(arg)
-        else:  # i.e., AptCheck.__CHECK_PACKAGE
+        else:  # i.e., AptDiff.__CHECK_PACKAGE
           self.__do_check_package(arg)
     # Close processing input handles so that the pipeline knows the data is
     # over and the processes will exit.
@@ -437,7 +436,7 @@ class AptCheck:
       self.__md5sum_in.flush()
 
 def version(fileobj):
-  print >> fileobj, "apt-check " + VERSION
+  print >> fileobj, "apt-diff " + VERSION
 
 def usage(fileobj):
   version(fileobj)
@@ -473,18 +472,18 @@ def main(argv):
     usage(sys.stderr)
     return 2
   apt_helper.initialize()
-  apt_check = AptCheck(False,
-                       False,
-                       False,
-                       None)
+  apt_diff = AptDiff(False,
+                     False,
+                     False,
+                     None)
   no_override_cache = False
   tempdir = None
   for (opt, arg) in opts:
     opt = opt.lstrip("-")
     if opt == _PACKAGE or opt == _SHORT_PACKAGE:
-      apt_check.check_package(arg)
+      apt_diff.check_package(arg)
     elif opt == _PATH or opt == _SHORT_PATH:
-      apt_check.check_path(arg)
+      apt_diff.check_path(arg)
     elif opt == _APT_OPTION or opt == _SHORT_APT_OPTION:
       parts = arg.split("=")
       apt_helper.set_option(parts[0], "=".join(parts[1:]))
@@ -495,13 +494,13 @@ def main(argv):
       version(sys.stdout)
       return 0
     elif opt == _NO_IGNORE_EXTRAS:
-      apt_check.no_ignore_extras = True
+      apt_diff.no_ignore_extras = True
     elif opt == _NO_IGNORE_CONFFILES:
-      apt_check.no_ignore_conffiles = True
+      apt_diff.no_ignore_conffiles = True
     elif opt == _NO_OVERRIDE_CACHE:
       no_override_cache = True
     elif opt == _REPORT_UNVERIFIABLE:
-      apt_check.report_unverifiable = True
+      apt_diff.report_unverifiable = True
     elif opt == _TEMPDIR:
       tempdir = arg
     else:
@@ -511,10 +510,10 @@ def main(argv):
     # Try to guess what the user meant by this.
     if arg[0] == "/":
       # Treat it like --path
-      apt_check.check_path(arg)
+      apt_diff.check_path(arg)
     elif arg[0].isalnum():
       # Treat it like --package
-      apt_check.check_package(arg)
+      apt_diff.check_package(arg)
     else:
       print >> sys.stderr, "Don't know what to do with \"%s\"" % arg
       usage(sys.stderr)
@@ -522,7 +521,7 @@ def main(argv):
   # Create default tempdir if none specified.
   if tempdir == None:
     tempdir = os.path.join(tempfile.gettempdir(),
-                           "apt-check_" + str(os.getuid()))
+                           "apt-diff_" + str(os.getuid()))
     _ensure_dir(tempdir)
   if tempdir.find(" ") != -1:
     # This would mess up our processing pipeline.
@@ -535,8 +534,8 @@ def main(argv):
     apt_helper.set_option("Dir::Cache::Archives", archive_dir)
   extraction_dir = os.path.join(tempdir, "extracted")
   _ensure_dir(extraction_dir)
-  apt_check.extraction_dir = extraction_dir
-  apt_check.execute()
+  apt_diff.extraction_dir = extraction_dir
+  apt_diff.execute()
   # Recursively delete the extracted packages.
   shutil.rmtree(extraction_dir)
 

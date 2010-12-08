@@ -50,7 +50,7 @@ class AptFetcher:
 
   def __on_missing_md5sums(self, source, lines):
     for line in lines.splitlines():
-      # The input comes directly from the AptCheck class and is simply a list of
+      # The input comes directly from the AptDiff class and is simply a list of
       # files that are missing their md5sums, so pass it directly to the fetch
       # function.
       self.__fetch_owning_package(line)
