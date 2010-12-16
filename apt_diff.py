@@ -36,7 +36,7 @@ import sys
 import tempfile
 import time
 
-VERSION = "0.9"
+VERSION = "0.9.1"
 
 # Constants for our command-line argument names.
 _PACKAGE = "package"
@@ -49,8 +49,8 @@ _HELP = "help"
 _SHORT_HELP = "h"
 _VERSION = "version"
 _SHORT_VERSION = "V"
+_IGNORE_CONFFILES = "ignore-conffiles"
 _NO_IGNORE_EXTRAS = "no-ignore-extras"
-_NO_IGNORE_CONFFILES = "no-ignore-conffiles"
 _NO_OVERRIDE_CACHE = "no-override-cache"
 _REPORT_UNVERIFIABLE = "report-unverifiable"
 _TEMPDIR = "tempdir"
@@ -67,8 +67,8 @@ Options:
     --help          -h                 Show this help.
     --version       -V                 Show the version.
 
+    --ignore-conffiles                 Ignore conffiles.
     --no-ignore-extras                 Do not ignore extra files/directories.
-    --no-ignore-conffiles              Do not ignore conffiles.
     --no-override-cache                Do not override the package cache
                                        directory when running as non-root.
     --report-unverifiable              Report unverifiable directories and
@@ -129,12 +129,12 @@ class AptDiff:
   __CHECK_PACKAGE = 1
 
   def __init__(self,
+               ignore_conffiles,
                no_ignore_extras,
-               no_ignore_conffiles,
                report_unverifiable,
                extraction_dir):
+    self.ignore_conffiles = ignore_conffiles
     self.no_ignore_extras = no_ignore_extras
-    self.no_ignore_conffiles = no_ignore_conffiles
     self.report_unverifiable = report_unverifiable
     self.extraction_dir = extraction_dir
     self.discrepancy_count = 0
@@ -144,7 +144,8 @@ class AptDiff:
     self.unverifiable_link_count = 0
     self.unverifiable_dir_count = 0
     self.__actions = []
-    self.__package_md5sums = {}
+    self.__conffiles_status = dpkg_helper.ConffilesStatus()
+    self.__md5sums_info = dpkg_helper.MD5SumsInfo()
     self.__tree = dpkg_helper.FilesystemNode()
 
   def check_path(self, path):
@@ -156,10 +157,21 @@ class AptDiff:
 
   def execute(self):
     time1 = time.time()
-    # Build the list of paths that we care about and load a file tree for them.
-    paths = [
-        arg for action, arg in self.__actions if AptDiff.__CHECK_PATH == action
+    # Build the list of paths and packages that we care about.
+    packages = [
+        arg for action, arg in self.__actions
+            if AptDiff.__CHECK_PACKAGE == action
     ]
+    paths = [
+        arg for action, arg in self.__actions
+            if AptDiff.__CHECK_PATH == action
+    ]
+    # Load all files for package checks. We don't really need them here because
+    # we load the .list in __do_check_package, but apt_fetcher_process needs
+    # them in the main tree so that it knows which package to fetch for their
+    # files.
+    for package in packages:
+      self.__tree.load_files_for_pkgname(package)
     if len(paths) > 0:
       # At least one path check requested, so we need to load by path.
       if "/" in paths:
@@ -167,19 +179,11 @@ class AptDiff:
         # improved speed.
         paths = None
       self.__tree.load_files_for_paths(paths)
-      if self.no_ignore_conffiles:
-        # Don't need to load the list.
-        self.__conftree = None
-      else:
-        self.__conftree = dpkg_helper.FilesystemNode()
-        self.__conftree.load_conffiles_for_paths(paths)
-    # Also load all files for package checks into the same tree. We don't need
-    # that for this class because we load the .list in __do_check_package,
-    # but apt_fetcher_process needs them in the main tree so that it knows which
-    # package to fetch for their files.
-    for action, arg in self.__actions:
-      if AptDiff.__CHECK_PACKAGE == action:
-        self.__tree.load_files_for_pkgname(arg)
+      # Since at least one path check was requested, we have to load conffiles
+      # info for every package, since any package could own conffiles at the
+      # requested path.
+      packages = None
+    self.__conffiles_status.load_conffiles_for_packages(packages)
     self.__apt_helper = apt_helper.AptHelper()
     # Start our processing pipeline.
     (self.__md5sum_in,
@@ -234,14 +238,10 @@ class AptDiff:
   def __do_check_path(self, normpath):
     # Find the right node for this path in the tree.
     (last_node, node) = self.__tree.lookup(normpath)
-    if self.no_ignore_conffiles:
-      confnode = None
-    else:
-      confnode = self.__conftree.lookup(normpath)[1]
     # We do not check if a directory crossed in this step was a symlink--we
     # always use False. (This allows a user to effectively suppress the special
     # symlink logic by starting the traversal below the symlink.)
-    self.__do_check(normpath, node, last_node, confnode, False, True)
+    self.__do_check(normpath, node, last_node, False, True)
 
   def __do_check_package(self, pkgname):
     tree = dpkg_helper.FilesystemNode()
@@ -249,18 +249,12 @@ class AptDiff:
     if not tree.has_children():
       print "Package %s does not own any installed paths" % pkgname
       return
-    if self.no_ignore_conffiles:
-      conftree = None
-    else:
-      conftree = dpkg_helper.FilesystemNode()
-      conftree.load_conffiles_for_pkgname(pkgname)
-    self.__do_check("/", tree, None, conftree, False, False)
+    self.__do_check("/", tree, None, False, False)
 
   def __do_check(self,
                  normpath,
                  node,
                  parent,
-                 confnode,
                  within_symlink,
                  check_extras):
     try:
@@ -345,15 +339,10 @@ class AptDiff:
           last = None
           for ent in ents:
             if ent != last:
-              if None != confnode:
-                child_confnode = confnode.find_child(ent)
-              else:
-                child_confnode = None
               self.__do_check(
                 os.path.join(normpath, ent),
                 node.find_child(ent),
                 node,
-                child_confnode,
                 within_symlink,
                 check_extras)
             last = ent
@@ -391,13 +380,15 @@ class AptDiff:
                 path,
                 node.pkgname())
         elif isfile:
-          # It is a regular file, so check its content. 
-          if None != confnode:
-            # Although we'd love to display diffs for conffiles, most packages
-            # do not ship md5sums for their conffiles, so checking each conffile
-            # usually requires re-downloading the package. Since there are tons
-            # of conffiles on even a basic system, this is too costly, so by
-            # default we don't check conffiles.
+          # It is a regular file, so check its content.
+          if node.has_multiple_owners():
+            # We don't currently have a way to figure out which md5sum to use in
+            # this case, so just skip this file.
+            print ("Skipping file %s because it is owned by multiple packages" %
+                path)
+            return
+          if (self.ignore_conffiles and
+              self.__conffiles_status.has_conffile(normpath)):
             self.ignored_conffiles_count = self.ignored_conffiles_count + 1
             return
           # Due to our above assumption, this path may not actually be a regular
@@ -417,27 +408,21 @@ class AptDiff:
       print >> sys.stderr, "Don't have read permission for " + path
       self.__error()
       return
-    if package not in self.__package_md5sums:
-      # Haven't loaded this md5sums file yet. Do it now.
-      try:
-        f = open("/var/lib/dpkg/info/%s.md5sums" % package, "r")
-      except:
-        f = None
-      if f != None:
-        file_md5sums = {}
-        for line in f:
-          if line[-1] == "\n":
-            end = -1
-          else:
-            end = 0
-          file_md5sums["/" + line[34:end]] = line[:32]
-        f.close()
-      else:
-        file_md5sums = None
-      self.__package_md5sums[package] = file_md5sums
-    else:
-      file_md5sums = self.__package_md5sums[package]
-    if file_md5sums == None or normpath not in file_md5sums:
+    # Try to find an md5sum for this file, first from the dpkg status file and
+    # then from the info/*.md5sums file.
+    md5sum = None
+    status = self.__conffiles_status.get_conffile_status(normpath)
+    if None != status:
+      (md5sum, obsolete) = status
+      if obsolete:
+        # Don't waste time on obsolete conffiles. We could check their md5sum,
+        # but if there is a discrepancy we cannot produce a diff because the
+        # conffile is no longer shipped in its owning package.
+        print "Skipping obsolete conffile %s owned by %s" % (path, package)
+        return
+    if None == md5sum:
+      md5sum = self.__md5sums_info.load_md5sum(package, normpath)
+    if None == md5sum:
       # Either this package does not ship an md5sums file or it does but doesn't
       # contain an md5sum for this file. In either case, we need to bypass the
       # md5sum verification stage and skip right to downloading the package for
@@ -447,7 +432,6 @@ class AptDiff:
     else:
       # We have the md5sum, so verify it first to avoid having to download
       # packages in the common case.
-      md5sum = file_md5sums[normpath]
       self.__md5sum_in.write("%s  %s\n" % (md5sum, normpath))
       self.__md5sum_in.flush()
 
@@ -478,8 +462,8 @@ def main(argv):
          _APT_OPTION + "=",
          _HELP,
          _VERSION,
+         _IGNORE_CONFFILES,
          _NO_IGNORE_EXTRAS,
-         _NO_IGNORE_CONFFILES,
          _NO_OVERRIDE_CACHE,
          _REPORT_UNVERIFIABLE,
          _TEMPDIR + "="])
@@ -509,10 +493,10 @@ def main(argv):
     elif opt == _VERSION or opt == _SHORT_VERSION:
       version(sys.stdout)
       return 0
+    elif opt == _IGNORE_CONFFILES:
+      apt_diff.ignore_conffiles = True
     elif opt == _NO_IGNORE_EXTRAS:
       apt_diff.no_ignore_extras = True
-    elif opt == _NO_IGNORE_CONFFILES:
-      apt_diff.no_ignore_conffiles = True
     elif opt == _NO_OVERRIDE_CACHE:
       no_override_cache = True
     elif opt == _REPORT_UNVERIFIABLE:

@@ -27,11 +27,6 @@ class AptFetcher:
 
   def __fetch_owning_package(self, filename):
     node = self.__tree.lookup(filename)[1]
-    if node.has_multiple_owners():
-      print >> sys.stderr, (
-          "Unable to fully check file %s because multiple packages claim to "
-          "own it" % filename)
-      return
     pkgname = node.pkgname()
     if pkgname not in self.__pkg_paths:
       # Haven't downloaded this package archive yet. Get it now.
