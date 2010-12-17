@@ -1,5 +1,3 @@
-#!/usr/bin/python
-#
 # Diff filesystem content against the APT installation sources.
 #
 # Copyright (c) 2010 Tristan Schmelcher <tristan_schmelcher@alumni.uwaterloo.ca>
@@ -450,98 +448,94 @@ def _ensure_dir(path):
 
 def main(argv):
   try:
-    opts, args = getopt.getopt(
-        argv,
-        _SHORT_PACKAGE + ":" +
-        _SHORT_PATH + ":" +
-        _SHORT_APT_OPTION + ":" +
-        _SHORT_HELP +
-        _SHORT_VERSION,
-        [_PACKAGE + "=",
-         _PATH + "=",
-         _APT_OPTION + "=",
-         _HELP,
-         _VERSION,
-         _IGNORE_CONFFILES,
-         _NO_IGNORE_EXTRAS,
-         _NO_OVERRIDE_CACHE,
-         _REPORT_UNVERIFIABLE,
-         _TEMPDIR + "="])
-  except getopt.GetoptError, err:
-    print >> sys.stderr, str(err)
-    usage(sys.stderr)
-    return 2
-  apt_helper.initialize()
-  apt_diff = AptDiff(False,
-                     False,
-                     False,
-                     None)
-  no_override_cache = False
-  tempdir = None
-  for (opt, arg) in opts:
-    opt = opt.lstrip("-")
-    if opt == _PACKAGE or opt == _SHORT_PACKAGE:
-      apt_diff.check_package(arg)
-    elif opt == _PATH or opt == _SHORT_PATH:
-      apt_diff.check_path(arg)
-    elif opt == _APT_OPTION or opt == _SHORT_APT_OPTION:
-      parts = arg.split("=")
-      apt_helper.set_option(parts[0], "=".join(parts[1:]))
-    elif opt == _HELP or opt == _SHORT_HELP:
-      usage(sys.stdout)
-      return 0
-    elif opt == _VERSION or opt == _SHORT_VERSION:
-      version(sys.stdout)
-      return 0
-    elif opt == _IGNORE_CONFFILES:
-      apt_diff.ignore_conffiles = True
-    elif opt == _NO_IGNORE_EXTRAS:
-      apt_diff.no_ignore_extras = True
-    elif opt == _NO_OVERRIDE_CACHE:
-      no_override_cache = True
-    elif opt == _REPORT_UNVERIFIABLE:
-      apt_diff.report_unverifiable = True
-    elif opt == _TEMPDIR:
-      tempdir = arg
-    else:
-      # Shouldn't happen because getopt should have thrown an error.
-      raise Exception("Unexpected option")
-  for arg in args:
-    # Try to guess what the user meant by this.
-    if arg[0] == "/":
-      # Treat it like --path
-      apt_diff.check_path(arg)
-    elif arg[0].isalnum():
-      # Treat it like --package
-      apt_diff.check_package(arg)
-    else:
-      print >> sys.stderr, "Don't know what to do with \"%s\"" % arg
+    try:
+      opts, args = getopt.getopt(
+          argv,
+          _SHORT_PACKAGE + ":" +
+          _SHORT_PATH + ":" +
+          _SHORT_APT_OPTION + ":" +
+          _SHORT_HELP +
+          _SHORT_VERSION,
+          [_PACKAGE + "=",
+           _PATH + "=",
+           _APT_OPTION + "=",
+           _HELP,
+           _VERSION,
+           _IGNORE_CONFFILES,
+           _NO_IGNORE_EXTRAS,
+           _NO_OVERRIDE_CACHE,
+           _REPORT_UNVERIFIABLE,
+           _TEMPDIR + "="])
+    except getopt.GetoptError, err:
+      print >> sys.stderr, str(err)
       usage(sys.stderr)
       return 2
-  # Create default tempdir if none specified.
-  if tempdir == None:
-    tempdir = os.path.join(tempfile.gettempdir(),
-                           "apt-diff_" + str(os.getuid()))
-    _ensure_dir(tempdir)
-  if tempdir.find(" ") != -1:
-    # This would mess up our processing pipeline.
-    raise Exception("Spaces are not supported in the tempdir path")
-  if not no_override_cache and os.getuid() != 0:
-    # Set default archive dir to one we can actually write to.
-    archive_dir = os.path.join(tempdir, "archives")
-    _ensure_dir(archive_dir)
-    _ensure_dir(os.path.join(archive_dir, "partial"))
-    apt_helper.set_option("Dir::Cache::Archives", archive_dir)
-  extraction_dir = os.path.join(tempdir, "extracted")
-  _ensure_dir(extraction_dir)
-  apt_diff.extraction_dir = extraction_dir
-  apt_diff.execute()
-  # Recursively delete the extracted packages.
-  shutil.rmtree(extraction_dir)
-
-if __name__ == "__main__":
-  try:
-    exitcode = main(sys.argv[1:])
+    apt_helper.initialize()
+    apt_diff = AptDiff(False,
+                       False,
+                       False,
+                       None)
+    no_override_cache = False
+    tempdir = None
+    for (opt, arg) in opts:
+      opt = opt.lstrip("-")
+      if opt == _PACKAGE or opt == _SHORT_PACKAGE:
+        apt_diff.check_package(arg)
+      elif opt == _PATH or opt == _SHORT_PATH:
+        apt_diff.check_path(arg)
+      elif opt == _APT_OPTION or opt == _SHORT_APT_OPTION:
+        parts = arg.split("=")
+        apt_helper.set_option(parts[0], "=".join(parts[1:]))
+      elif opt == _HELP or opt == _SHORT_HELP:
+        usage(sys.stdout)
+        return 0
+      elif opt == _VERSION or opt == _SHORT_VERSION:
+        version(sys.stdout)
+        return 0
+      elif opt == _IGNORE_CONFFILES:
+        apt_diff.ignore_conffiles = True
+      elif opt == _NO_IGNORE_EXTRAS:
+        apt_diff.no_ignore_extras = True
+      elif opt == _NO_OVERRIDE_CACHE:
+        no_override_cache = True
+      elif opt == _REPORT_UNVERIFIABLE:
+        apt_diff.report_unverifiable = True
+      elif opt == _TEMPDIR:
+        tempdir = arg
+      else:
+        # Shouldn't happen because getopt should have thrown an error.
+        raise Exception("Unexpected option")
+    for arg in args:
+      # Try to guess what the user meant by this.
+      if arg[0] == "/":
+        # Treat it like --path
+        apt_diff.check_path(arg)
+      elif arg[0].isalnum():
+        # Treat it like --package
+        apt_diff.check_package(arg)
+      else:
+        print >> sys.stderr, "Don't know what to do with \"%s\"" % arg
+        usage(sys.stderr)
+        return 2
+    # Create default tempdir if none specified.
+    if tempdir == None:
+      tempdir = os.path.join(tempfile.gettempdir(),
+                             "apt-diff_" + str(os.getuid()))
+      _ensure_dir(tempdir)
+    if tempdir.find(" ") != -1:
+      # This would mess up our processing pipeline.
+      raise Exception("Spaces are not supported in the tempdir path")
+    if not no_override_cache and os.getuid() != 0:
+      # Set default archive dir to one we can actually write to.
+      archive_dir = os.path.join(tempdir, "archives")
+      _ensure_dir(archive_dir)
+      _ensure_dir(os.path.join(archive_dir, "partial"))
+      apt_helper.set_option("Dir::Cache::Archives", archive_dir)
+    extraction_dir = os.path.join(tempdir, "extracted")
+    _ensure_dir(extraction_dir)
+    apt_diff.extraction_dir = extraction_dir
+    apt_diff.execute()
+    # Recursively delete the extracted packages.
+    shutil.rmtree(extraction_dir)
   except KeyboardInterrupt:
-    exitcode = 130
-  sys.exit(exitcode)
+    return 130
