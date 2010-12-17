@@ -1,5 +1,5 @@
-apt-diff (0.9.1) unstable; urgency=low
+apt-diff (0.9.2) unstable; urgency=low
 
   * Initial package.
 
- -- Tristan Schmelcher <tristan_schmelcher@alumni.uwaterloo.ca>  Thu, 16 Dec 2010 16:31:35 -0800
+ -- Tristan Schmelcher <tristan_schmelcher@alumni.uwaterloo.ca>  Fri, 17 Dec 2010 11:59:39 -0800
