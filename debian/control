@@ -1,0 +1,15 @@
+Source: apt-diff
+Section: admin
+Priority: optional
+Maintainer: Tristan Schmelcher <tristan_schmelcher@alumni.uwaterloo.ca>
+Build-Depends: debhelper (>= 7), python-support, python-dev
+Standards-Version: 3.8.2
+
+Package: apt-diff
+Homepage: https://github.com/TristanSchmelcher/apt-diff
+Architecture: all
+Depends: ${python:Depends}, ${misc:Depends}
+Description: Diff filesystem content against the APT installation sources
+ A command-line APT tool to compute a textual diff for any local modifications
+ to packaged files.
+ .
