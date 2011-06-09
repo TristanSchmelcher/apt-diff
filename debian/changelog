@@ -1,3 +1,9 @@
+apt-diff (0.9.3) lucid; urgency=low
+
+  * Fixed some Lintian warnings.
+
+ -- Tristan Schmelcher <tristan_schmelcher@alumni.uwaterloo.ca>  Thu, 09 Jun 2011 12:46:20 -0700
+
 apt-diff (0.9.2) unstable; urgency=low
 
   * Initial package.

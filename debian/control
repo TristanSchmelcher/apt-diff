@@ -2,8 +2,8 @@ Source: apt-diff
 Section: admin
 Priority: optional
 Maintainer: Tristan Schmelcher <tristan_schmelcher@alumni.uwaterloo.ca>
-Build-Depends: debhelper (>= 7), python-support, python-dev
-Standards-Version: 3.8.2
+Build-Depends: debhelper (>= 7), python-support
+Standards-Version: 3.8.4
 
 Package: apt-diff
 Homepage: https://github.com/TristanSchmelcher/apt-diff
