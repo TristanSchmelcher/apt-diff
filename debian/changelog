@@ -1,3 +1,9 @@
+apt-diff (0.9.4) natty; urgency=low
+
+  * Bump version again to a non-dash version, since native packages aren't supposed to use those.
+
+ -- Tristan Schmelcher <tristan_schmelcher@alumni.uwaterloo.ca>  Thu, 09 Jun 2011 22:45:26 -0700
+
 apt-diff (0.9.3-1) natty; urgency=low
 
   * Bump version to force Launchpad to take a new build.

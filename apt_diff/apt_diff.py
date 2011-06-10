@@ -34,7 +34,7 @@ import sys
 import tempfile
 import time
 
-VERSION = "0.9.3"
+VERSION = "0.9.4"
 
 # Constants for our command-line argument names.
 _PACKAGE = "package"
