@@ -100,7 +100,7 @@ class LineSink:
       written = os.write(self.__fileobj.fileno(), self.__partial_output)
     except OSError, e:
       # Probably broken pipe. Have to force-close the file. :(
-      print >> sys.stderr, "Unable to write to pipe:", e
+      print >> sys.stderr, "Unable to write to pipe: %s" % e
       self.__closed = True
       self.__poller.unregister(self.__fileobj)
       self.__fileobj.close()

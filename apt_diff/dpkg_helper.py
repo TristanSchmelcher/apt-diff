@@ -30,12 +30,9 @@ _MULTIPLE = "(multiple packages)"
 
 def extract_archive(archive_path, destdir):
   """Extracts an archive file on disk to the given directory."""
-  devnull = open(os.devnull, "r")
-  try:
+  with open(os.devnull, "r") as devnull:
     subprocess.check_call(["dpkg-deb", "-x", archive_path, destdir],
                           stdin = devnull)
-  finally:
-    devnull.close()
 
 class FilesystemNode:
   """A FilesystemNode is a representation of a file or directory entry from a
@@ -218,9 +215,9 @@ class ConffilesStatus:
         trim = 9
       else:
         trim = 0
-      filepath = line[1:-34 - trim]
+      filename = line[1:-34 - trim]
       md5sum = line[-33 - trim:-1 - trim]
-      self.__conffiles[filepath] = (md5sum, obsolete)
+      self.__conffiles[filename] = (md5sum, obsolete)
 
   def has_conffile(self, normpath):
     return normpath in self.__conffiles

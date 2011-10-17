@@ -19,18 +19,14 @@
 # USA.
 
 import distributor
+import launch_helper
+import md5sums_checker
 import os
-import subprocess
-import sys
 
 def _spawner():
-  devnull = open(os.devnull, "r")
-  proc = subprocess.Popen(["md5sum", "--quiet", "-c"],
-                          stdin = subprocess.PIPE,
-                          stdout = subprocess.PIPE,
-                          stderr = devnull)
-  devnull.close()
-  return (proc.stdin, proc.stdout)
+  (in_read, in_write) = os.pipe()
+  out_read = launch_helper.launch(md5sums_checker.run, [in_read], [in_write])
+  return (os.fdopen(in_write, "w"), os.fdopen(out_read, "r"))
 
 def run(input_files, output_file):
   distributor.run(input_files[0], output_file, _spawner)

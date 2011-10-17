@@ -86,8 +86,10 @@ class AptHelper:
             (pkgname, fetcher.Items[0].ErrorText))
         return None
       return fetcher.Items[0].DestFile
+    except KeyboardInterrupt:
+      raise
     except BaseException, e:
-      print >> sys.stderr, "Failed to fetch package %s:" % pkgname, e
+      print >> sys.stderr, "Failed to fetch package %s: %s: %s" % (pkgname, type(e), e)
       return None
     finally:
       # Revert the change (so as to not do a cumulative fetch in each

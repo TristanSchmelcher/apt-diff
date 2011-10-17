@@ -1,3 +1,9 @@
+apt-diff (0.9.5) natty; urgency=low
+
+  * Use an internal md5sum implementation to avoid parsing problems on non-English systems.
+
+ -- Tristan Schmelcher <tristan_schmelcher@alumni.uwaterloo.ca>  Sun, 16 Oct 2011 13:38:02 -0700
+
 apt-diff (0.9.4) natty; urgency=low
 
   * Bump version again to a non-dash version, since native packages aren't supposed to use those.

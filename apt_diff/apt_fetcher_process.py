@@ -49,21 +49,9 @@ class AptFetcher:
                                (first, pkgname, path, filename))
       self.__output_file.flush()
 
-  def __on_failed_md5sums(self, source, lines):
+  def __on_check_files(self, source, lines):
     for line in lines.splitlines():
-      # The input comes from md5sum --quiet -c, so it should end in ": FAILED".
-      # Strip it.
-      if not line.endswith(": FAILED"):
-        print >> sys.stderr, "Unexpected line from md5sum stage: " + line
-        continue
-      filename = line[:-8]
-      self.__fetch_owning_package(filename)
-
-  def __on_missing_md5sums(self, source, lines):
-    for line in lines.splitlines():
-      # The input comes directly from the AptDiff class and is simply a list of
-      # files that are missing their md5sums, so pass it directly to the fetch
-      # function.
+      # The input is a list of files that need to be checked.
       self.__fetch_owning_package(line)
 
   def run(self, input_files, output_file):
@@ -73,8 +61,8 @@ class AptFetcher:
     self.__output_file = output_file
     poller = pollingtools.Poller()
     pollingtools.LineSource(failed_md5sums_input_file, poller,
-                            self.__on_failed_md5sums)
+                            self.__on_check_files)
     pollingtools.LineSource(missing_md5sums_input_file, poller,
-                            self.__on_missing_md5sums)
+                            self.__on_check_files)
     while poller.has_pollers():
       poller.poll()

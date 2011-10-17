@@ -26,15 +26,16 @@ import apt_helper
 import differ_process
 import dpkg_helper
 import getopt
+import launch_helper
 import os
-import parallel_md5sum_process
+import parallel_md5sums_checker
 import shutil
 import stat
 import sys
 import tempfile
 import time
 
-VERSION = "0.9.4"
+VERSION = "0.9.5"
 
 # Constants for our command-line argument names.
 _PACKAGE = "package"
@@ -74,47 +75,18 @@ Options:
     --tempdir          <dir>           Use <dir> as the temp directory instead
                                        of creating one automatically."""
 
-def _launch(function, input_read_handles, close_in_child):
-  (out_read, out_write) = os.pipe()
-  if os.fork() == 0:
-    # Child.
-    try:
-      for fileno in close_in_child:
-        os.close(fileno)
-      inputs = []
-      for in_read in input_read_handles:
-        inputs.append(os.fdopen(in_read, "r"))
-      os.close(out_read)
-      try:
-        function(inputs, os.fdopen(out_write, "w"))
-        exitcode = 0
-      except KeyboardInterrupt:
-        raise
-      except BaseException, e:
-        print >> sys.stderr, "Exception while executing child:", e
-        exitcode = 1
-    except KeyboardInterrupt:
-      exitcode = 130
-    sys.exit(exitcode)
-  else:
-    # Parent.
-    for in_read in input_read_handles:
-      os.close(in_read)
-    os.close(out_write)
-    return out_read
-
 def _launch_pipeline(apt_helper, tree, extraction_dir):
   (md5sum_in_read, md5sum_in_write) = os.pipe()
-  md5sum_out_read = _launch(
-      parallel_md5sum_process.run,
+  md5sum_out_read = launch_helper.launch(
+      parallel_md5sums_checker.run,
       [md5sum_in_read],
       [md5sum_in_write])
   (apt_fetcher_in_read, apt_fetcher_in_write) = os.pipe()
-  apt_fetcher_out_read = _launch(
+  apt_fetcher_out_read = launch_helper.launch(
       apt_fetcher_process.AptFetcher(apt_helper, tree).run,
       [md5sum_out_read, apt_fetcher_in_read],
       [md5sum_in_write, apt_fetcher_in_write])
-  differ_out_read = _launch(
+  differ_out_read = launch_helper.launch(
       differ_process.create(extraction_dir),
       [apt_fetcher_out_read],
       [md5sum_in_write, apt_fetcher_in_write])
@@ -329,7 +301,7 @@ class AptDiff:
           try:
             ents = os.listdir(normpath)
           except OSError, e:
-            print >> sys.stderr, "Can't recurse into %s:" % path, e
+            print >> sys.stderr, "Can't recurse into %s: %s" % (path, e)
             self.__error()
             return
           ents.extend(node.children())
@@ -425,7 +397,7 @@ class AptDiff:
       # contain an md5sum for this file. In either case, we need to bypass the
       # md5sum verification stage and skip right to downloading the package for
       # comparison.
-      self.__apt_fetcher_in.write(normpath + "\n")
+      print >> self.__apt_fetcher_in, normpath
       self.__apt_fetcher_in.flush()
     else:
       # We have the md5sum, so verify it first to avoid having to download
