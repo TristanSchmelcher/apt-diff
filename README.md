@@ -1,4 +1,4 @@
 apt-diff
 ========
 
-A tool to diff filesystem content against the APT installation sources.
+Tool for comparing packages in the APT packaging system
