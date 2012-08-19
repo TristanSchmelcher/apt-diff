@@ -1,0 +1,7 @@
+build
+debian/apt-diff.debhelper.log
+debian/apt-diff.postinst.debhelper
+debian/apt-diff.prerm.debhelper
+debian/apt-diff.substvars
+debian/apt-diff/
+debian/files
