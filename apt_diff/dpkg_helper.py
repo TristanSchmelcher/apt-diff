@@ -21,12 +21,16 @@ import os
 import subprocess
 
 _DPKG_INFO_DIR = "/var/lib/dpkg/info/"
-_DPKG_MD5SUM_FORMAT = "/var/lib/dpkg/info/%s.md5sums"
 _LIST_FILE_EXT = ".list"
+_MD5SUMS_FILE_EXT = ".md5sums"
 _LIST_FILE_EXT_LEN = len(_LIST_FILE_EXT)
-_CONFFILES_FILE_EXT = ".conffiles"
-_CONFFILES_FILE_EXT_LEN = len(_CONFFILES_FILE_EXT)
 _MULTIPLE = "(multiple packages)"
+
+def _build_format(ext):
+  return ''.join((_DPKG_INFO_DIR, "%s", ext))
+
+_DPKG_MD5SUMS_FORMAT = _build_format(_MD5SUMS_FILE_EXT)
+_DPKG_LIST_FORMAT = _build_format(_LIST_FILE_EXT)
 
 def extract_archive(archive_path, destdir):
   """Extracts an archive file on disk to the given directory."""
@@ -43,48 +47,47 @@ class FilesystemNode:
     self.__pkgname = None
 
   def __record_owner(self, pkgname):
-    if None == self.__pkgname:
+    if not self.__pkgname:
       self.__pkgname = pkgname
     elif self.__pkgname != pkgname:
       self.__pkgname = _MULTIPLE
 
   def __add_child(self, name):
-    if None == self.__children:
+    if not self.__children:
       self.__children = {}
     child = FilesystemNode()
     self.__children[name] = child
     return child
 
   def __load_list(self, path, pkgname, include_paths):
-    fileobj = open(path)
-    for line in fileobj:
-      if None != include_paths:
-        # See if this path is a child of one of the listed ones.
-        include = False
-        for include_path in include_paths:
-          if line.startswith(include_path):
-            include = True
-            break
-        if not include:
-          continue
-      normpath = line.rstrip("\n")
-      if normpath == "/.":
-        # Special case for the root directory.
-        components = []
-      else:
-        components = normpath.lstrip("/").split("/")
-      current = self
-      for component in components:
+    with open(path) as fileobj:
+      for line in fileobj:
+        if include_paths:
+          # See if this path is a child of one of the listed ones.
+          include = False
+          for include_path in include_paths:
+            if line.startswith(include_path):
+              include = True
+              break
+          if not include:
+            continue
+        normpath = line.rstrip("\n")
+        if normpath == "/.":
+          # Special case for the root directory.
+          components = []
+        else:
+          components = normpath.lstrip("/").split("/")
+        current = self
+        for component in components:
+          current.__record_owner(pkgname)
+          child = current.find_child(component)
+          if not child:
+            child = current.__add_child(component)
+          current = child
         current.__record_owner(pkgname)
-        child = current.find_child(component)
-        if child == None:
-          child = current.__add_child(component)
-        current = child
-      current.__record_owner(pkgname)
-    fileobj.close()
 
   def has_children(self):
-    return None != self.__children
+    return bool(self.__children)
 
   def children(self):
     return self.__children
@@ -93,7 +96,7 @@ class FilesystemNode:
     return self.__pkgname
 
   def find_child(self, name):
-    if None == self.__children:
+    if not self.__children:
       return None
     else:
       return self.__children.get(name)
@@ -115,12 +118,12 @@ class FilesystemNode:
     for component in components:
       last_node = node
       node = node.find_child(component)
-      if node == None:
+      if not node:
         break
     return (last_node, node)
 
   def load_files_for_pkgname(self, pkgname):
-    filename = _DPKG_INFO_DIR + pkgname + _LIST_FILE_EXT
+    filename = _DPKG_LIST_FORMAT % pkgname
     if os.access(filename, os.F_OK):
       self.__load_list(filename, pkgname, None)
 
@@ -130,19 +133,6 @@ class FilesystemNode:
         pkgname = filename[:-_LIST_FILE_EXT_LEN]
         self.__load_list(_DPKG_INFO_DIR + filename, pkgname, paths)
 
-  """These last two are not actually used anymore."""
-
-  def load_conffiles_for_pkgname(self, pkgname):
-    filename = _DPKG_INFO_DIR + pkgname + _CONFFILES_FILE_EXT
-    if os.access(filename, os.F_OK):
-      self.__load_list(filename, pkgname, None)
-
-  def load_conffiles_for_paths(self, paths):
-    for filename in os.listdir(_DPKG_INFO_DIR):
-      if filename.endswith(_CONFFILES_FILE_EXT):
-        pkgname = filename[:-_CONFFILES_FILE_EXT_LEN]
-        self.__load_list(_DPKG_INFO_DIR + filename, pkgname, paths)
-
 class MD5SumsInfo:
   """An MD5SumsInfo is an accessor for the information stored in dpkg's
      info/*.md5sums files."""
@@ -150,35 +140,42 @@ class MD5SumsInfo:
   def __init__(self):
     self.__package_md5sums = {}
 
-  def load_md5sum(self, package, normpath):
+  def __get_package_md5sums(self, package):
     if package not in self.__package_md5sums:
       # Haven't loaded this md5sums file yet. Do it now.
-      md5sums_path = _DPKG_MD5SUM_FORMAT % package
+      md5sums_path = _DPKG_MD5SUMS_FORMAT % package
       try:
         f = open(md5sums_path, "r")
       except:
         f = None
-      if f != None:
-        file_md5sums = {}
-        for line in f:
-          if "\n" != line[-1]:
-            print >> sys.stderr, "Malformed line in %s: %s" % (
-                md5sums_path,
-                line)
-            continue
-          file_md5sums["/" + line[34:-1]] = line[:32]
-        f.close()
+      if f:
+	package_md5sums = {}
+        with f:
+	  for line in f:
+	    if "\n" != line[-1]:
+	      print >> sys.stderr, "Malformed line in %s: %s" % (
+	          md5sums_path,
+	          line)
+	      continue
+	    package_md5sums["/" + line[34:-1]] = line[:32]
       else:
-        file_md5sums = None
-      self.__package_md5sums[package] = file_md5sums
+        package_md5sums = None
+      self.__package_md5sums[package] = package_md5sums
     else:
-      file_md5sums = self.__package_md5sums[package]
-    if file_md5sums == None or normpath not in file_md5sums:
+      package_md5sums = self.__package_md5sums[package]
+    return package_md5sums
+
+  def has_md5sums(self, package):
+    return None != self.__get_package_md5sums(package)
+
+  def get_md5sum(self, package, normpath):
+    package_md5sums = self.__get_package_md5sums(package)
+    if not package_md5sums or normpath not in package_md5sums:
       # Either this package does not ship an md5sums file or it does but doesn't
       # contain an md5sum for this file.
       return None
     else:
-      return file_md5sums[normpath]
+      return package_md5sums[normpath]
 
 class ConffilesStatus:
   """An MD5SumsInfo is an accessor for the Conffiles fields stored in dpkg's
@@ -190,7 +187,7 @@ class ConffilesStatus:
   def load_conffiles_for_packages(self, packages):
     """Loads the list of conffiles owned by the given packages. If None, it
        loads the conffiles for all packages."""
-    if None != packages and len(packages) == 0:
+    if None != packages and not packages:
       # With an empty list of packages, dpkg-query will query every package, but
       # we want to query none at all, so just return.
       return
@@ -202,7 +199,7 @@ class ConffilesStatus:
     # output.
     p = subprocess.Popen(
         ["dpkg-query", "-f", "${Conffiles}\\n", "-W"] + packages,
-        stdout = subprocess.PIPE)
+        stdout=subprocess.PIPE)
     for line in p.stdout:
       if "\n" != line[-1]:
         print >> sys.stderr, "Malformed line in Conffiles field: " + line

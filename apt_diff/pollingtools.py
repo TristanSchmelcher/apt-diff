@@ -38,13 +38,13 @@ class Poller:
     del self.__map[fileobj.fileno()]
     self.__poll.unregister(fileobj)
 
-  def poll(self, timeout = None):
+  def poll(self, timeout=None):
     for fileno, event in self.__poll.poll(timeout):
       # Call handler
       self.__map[fileno](fileno, event)
 
   def has_pollers(self):
-    return 0 != len(self.__map)
+    return bool(self.__map)
 
 def _set_non_blocking(f):
   fileno = f.fileno()
@@ -53,7 +53,7 @@ def _set_non_blocking(f):
   fcntl.fcntl(fileno, fcntl.F_SETFL, flags)
 
 class LineSource:
-  def __init__(self, fileobj, poller, consumer_function, close_function = None):
+  def __init__(self, fileobj, poller, consumer_function, close_function=None):
     self.__fileobj = fileobj
     self.__poller = poller
     self.__consumer_function = consumer_function
@@ -66,7 +66,7 @@ class LineSource:
 
   def __on_pollin(self, fileno, event):
     text = os.read(self.__fileobj.fileno(), _READ_SIZE)
-    if 0 == len(text):
+    if not text:
       # fd is ready but returns no data. This means it's EOF.
       self.__poller.unregister(self.__fileobj)
       self.__fileobj.close()
@@ -75,7 +75,7 @@ class LineSource:
         self.__consumer_function(self, self.__partial_input)
         self.__partial_input = ""
       # Notify that we have closed.
-      if None != self.__close_function:
+      if self.__close_function:
         self.__close_function(self)
       return
     # Else it has more data.

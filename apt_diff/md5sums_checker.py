@@ -54,9 +54,7 @@ def _compute_md5_by_mmap(filename):
 def _compute_md5(filename):
   try:
     return _compute_md5_by_mmap(filename)
-  except KeyboardInterrupt:
-    raise
-  except BaseException, e:
+  except Exception:
     # Silently fall back to a non-mmap'ed approach (mmap may fail for large
     # files on 32-bit machines).
     return _compute_md5_by_syscalls(filename)
@@ -73,7 +71,6 @@ def run(input_files, output_file):
       if not _verify_md5(filename, expected_md5):
         print >> output_file, filename
         output_file.flush()
-    except KeyboardInterrupt:
-      raise
-    except BaseException, e:
-      print >> sys.stderr, "Failed to compute md5sum for %s: %s: %s" % (filename, type(e), e)
+    except Exception, e:
+      print >> sys.stderr, "Failed to compute md5sum for %s: %s: %s" % (
+          filename, type(e), e)

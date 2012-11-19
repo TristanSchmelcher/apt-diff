@@ -3,7 +3,7 @@
 from distutils.core import setup
 
 setup(name = "apt-diff",
-      version = "0.9.5",
+      version = "0.9.6",
       description = "Diff filesystem content against the APT installation sources.",
       maintainer = "Tristan Schmelcher",
       maintainer_email = "tristan_schmelcher@alumni.uwaterloo.ca",

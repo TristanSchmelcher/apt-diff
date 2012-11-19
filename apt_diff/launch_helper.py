@@ -35,8 +35,18 @@ def launch(function, input_read_handles, close_in_child):
       exitcode = 0
     except KeyboardInterrupt:
       exitcode = 130
+    except SystemExit, e:
+      # Emulate the termination behaviour of SystemExit.
+      if type(e.code) is int:
+        exitcode = e.code
+      elif None == e.code:
+        exitcode = 0
+      else:
+        exitcode = 1
+        print >> sys.stderr, e.code
     except BaseException, e:
-      print >> sys.stderr, "Exception while executing child: %s: %s" % (type(e), e)
+      print >> sys.stderr, "Exception while executing child: %s: %s" % (type(e),
+          e)
       exitcode = 1
     finally:
       os._exit(exitcode)

@@ -38,7 +38,7 @@ class AptFetcher:
     else:
       path = self.__pkg_paths[pkgname]
       first = "F"
-    if path == None:
+    if not path:
       if first == "T":
         print >> sys.stderr, (
             "Unable to fully check package %s because it could not be fetched"

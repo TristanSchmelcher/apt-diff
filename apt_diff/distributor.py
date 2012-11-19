@@ -22,7 +22,7 @@ import pollingtools
 _DEFAULT_MAX_PROCESSES = 5
 
 def run(input_file, output_file, spawner_function,
-        max_processes = _DEFAULT_MAX_PROCESSES):
+        max_processes=_DEFAULT_MAX_PROCESSES):
   if max_processes < 1:
     raise ValueError("max_processes must be at least 1")
   poller = pollingtools.Poller()
@@ -35,7 +35,7 @@ def run(input_file, output_file, spawner_function,
 
   def on_process_source_closed(source):
     process_sources.remove(source)
-    if len(process_sources) == 0:
+    if not process_sources:
       # No sources left, so close the output
       sink.close()
 
@@ -43,7 +43,7 @@ def run(input_file, output_file, spawner_function,
   next_sink = [0]
 
   def on_source_lines(source, lines):
-    if len(process_sinks) != 0:
+    if process_sinks:
       # See if there is an existing process sink that is ready to accept more
       # lines.
       index = next_sink[0]

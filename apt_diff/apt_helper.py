@@ -48,7 +48,7 @@ class AptHelper:
     pkg = self.__cache[pkgname]
     ver = pkg.CurrentVer
     try:
-      if None != ver:
+      if ver:
         # Package is installed. Diff against the same version.
         # First check if this version is available in the repo.
         available = False
@@ -67,7 +67,7 @@ class AptHelper:
       else:
         # Package is not installed. Diff against the version that would be
         # installed if the user were to install the package.
-        if self.__dep_cache.GetCandidateVer(pkg) == None:
+        if not self.__dep_cache.GetCandidateVer(pkg):
           print >> sys.stderr, ("Can't fetch package %s because it is not "
               "installed and there is no installation candidate available in "
               "the archives" % pkgname)
@@ -86,15 +86,14 @@ class AptHelper:
             (pkgname, fetcher.Items[0].ErrorText))
         return None
       return fetcher.Items[0].DestFile
-    except KeyboardInterrupt:
-      raise
-    except BaseException, e:
-      print >> sys.stderr, "Failed to fetch package %s: %s: %s" % (pkgname, type(e), e)
+    except Exception, e:
+      print >> sys.stderr, "Failed to fetch package %s: %s: %s" % (pkgname,
+          type(e), e)
       return None
     finally:
       # Revert the change (so as to not do a cumulative fetch in each
       # iteration).
-      if None != ver:
+      if ver:
         self.__dep_cache.SetReInstall(pkg, False)
       else:
         self.__dep_cache.MarkDelete(pkg)

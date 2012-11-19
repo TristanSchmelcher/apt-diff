@@ -1,3 +1,9 @@
+apt-diff (0.9.6) natty; urgency=low
+
+  * More robust filetype checks.
+
+ -- Tristan Schmelcher <tristan_schmelcher@alumni.uwaterloo.ca>  Sun, 18 Nov 2012 17:04:13 -0800
+
 apt-diff (0.9.5) natty; urgency=low
 
   * Use an internal md5sum implementation to avoid parsing problems on non-English systems.
