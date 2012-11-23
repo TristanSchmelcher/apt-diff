@@ -53,6 +53,7 @@ _NO_IGNORE_EXTRAS = "no-ignore-extras"
 _NO_OVERRIDE_CACHE = "no-override-cache"
 _REPORT_UNVERIFIABLE = "report-unverifiable"
 _TEMPDIR = "tempdir"
+_NO_REMOVE_EXTRACTED = "no-remove-extracted"
 
 _USAGE = """
 Usage: apt-diff [OPTION]... [PATH|PACKAGE]...
@@ -73,7 +74,9 @@ Options:
     --report-unverifiable              Report unverifiable directories and
                                        symbolic links.
     --tempdir          <dir>           Use <dir> as the temp directory instead
-                                       of creating one automatically."""
+                                       of creating one automatically.
+    --no-remove-extracted              Don't remove extracted packages from the
+                                       temp directory after completion."""
 
 def _launch_pipeline(apt_helper, tree, extraction_dir):
   (md5sum_in_read, md5sum_in_write) = os.pipe()
@@ -235,19 +238,20 @@ class AptDiff:
       st = os.stat(normpath)
     except:
       st = None
-    exists = bool(lst)
-    isdir = st and stat.S_ISDIR(st.st_mode)
-    isfile = st and stat.S_ISREG(st.st_mode)
-    islink = lst and stat.S_ISLNK(lst.st_mode)
+    lexists = bool(lst)
+    exists = bool(st)
+    isdir = exists and stat.S_ISDIR(st.st_mode)
+    isfile = exists and stat.S_ISREG(st.st_mode)
+    islink = lexists and stat.S_ISLNK(lst.st_mode)
     path = normpath
     if isdir and path[-1] != "/":
       # Add a trailing slash so that the user can distinguish between
       # files and directories in the output.
       path = path + "/"
-    if node and not exists:
+    if node and not lexists:
       print "Missing path %s owned by %s" % (path, node.pkgname())
       self.__discrepancy()
-    elif not node and exists:
+    elif not node and lexists:
       if not check_extras:
         # If called from check_package() then we don't want to count or report
         # any extras because we will only have loaded one package's file tree,
@@ -273,16 +277,53 @@ class AptDiff:
       else:
         print "Extra path " + path
       self.__discrepancy()
-    elif not node and not exists:
+    elif not node and not lexists:
       # (We will only reach this case if the user explicitly started us at this
       # path.)
       print "Path %s not found in filesystem nor in any package" % path
     else:
-      # Else it exists on disk and in packages.
-      if node.has_children():
-        # Then this path is supposed to be a directory. See if that's the case.
+      # Else it exists on disk and in packages. Figure out what filetype it
+      # should have.
+      is_conffile = self.__conffiles_status.is_conffile(normpath)
+      if is_conffile and self.ignore_conffiles:
+        self.ignored_conffiles_count = self.ignored_conffiles_count + 1
+        return
+      is_obsolete_conffile = self.__conffiles_status.is_obsolete_conffile(
+          normpath)
+      is_non_obsolete_conffile = is_conffile and not is_obsolete_conffile
+      package_metadata_md5sum = None
+      if not node.has_multiple_owners():
+        # We don't have a way to figure out which md5sum to use when there
+        # are multiple owners.
+        package_metadata_md5sum = self.__md5sums_info.get_md5sum(node.pkgname(),
+                                                                 normpath)
+      dpkg_status_md5sum = None
+      if is_non_obsolete_conffile:
+        # We ignore dpkg md5sums for obsolete conffiles because obsolete
+        # conffiles can be replaced with anything. Even if still a file, there
+        # is no point in verifying their md5sum because we cannot diff them with
+        # anything.
+        dpkg_status_md5sum = self.__conffiles_status.get_md5sum(normpath)
+      # Arbitrarily prefer the md5sum from the package metadata.
+      md5sum = package_metadata_md5sum or dpkg_status_md5sum
+      # If we have an md5sum for this path, then it must be shipped as a file.
+      expect_file = bool(md5sum)
+      # If this path has children, then it must be shipped as a directory.
+      expect_dir = node.has_children()
+      # Sanity check that these are consistent.
+      if expect_file and expect_dir:
+        print ("Warning: Inconsistent dpkg state: path %s owned by %s has an "
+               "md5sum and children") % (path, node.pkgname())
+        # Continue and treat it as a directory.
+      if (dpkg_status_md5sum and package_metadata_md5sum and
+          dpkg_status_md5sum != package_metadata_md5sum):
+        print ("Warning: Inconsistent dpkg state: path %s owned by %s has "
+               "different md5sums in dpkg status database and package metadata "
+               "(%s vs. %s)") % (path, node.pkgname(), dpkg_status_md5sum,
+                                 package_metadata_md5sum)
+      if expect_dir:
         if isdir:
-          # Yes, so recurse and check the contents.
+          # It's a directory, so recurse and check the contents.
           if islink:
             # But if it is actually a _symlink_ to a directory then there is
             # another issue. If one package ships a directory at this path and
@@ -294,9 +335,8 @@ class AptDiff:
             # occurred at some point. Since this may have resulted in different
             # on-disk content than the packagers intended, we report it even
             # though it is not really a discrepancy.
-            print (
-                "Warning: Package content installed under %s crosses "
-                "unexpected symlink" % path)
+            print ("Warning: Package content installed under %s crosses "
+                   "unexpected symlink") % path
             within_symlink = True
           try:
             ents = os.listdir(normpath)
@@ -320,121 +360,136 @@ class AptDiff:
           # Not a directory on disk, so it's either a regular file, a special
           # file, or a symlink to a non-directory. Regardless, that's a
           # discrepancy
-          print "File %s is supposed to be a directory owned by %s" % (
+          print "Non-directory %s is supposed to be a directory owned by %s" % (
               path,
               node.pkgname())
           self.__discrepancy()
-      else:
-        # dpkg node does not have children, so this path is not a directory
-        # shipped with content. It could be a directory that is shipped empty,
-        # a file, or a symlink.
-        pkgname = None
-        if not node.has_multiple_owners():
-          pkgname = node.pkgname()
-        # If we have an md5sum for this path, then it is supposed to be a file.
-        must_be_file = bool(
-            self.__conffiles_status.get_conffile_status(normpath) or
-            (pkgname and self.__md5sums_info.get_md5sum(pkgname, normpath)))
-        # If this package ships a .md5sums file then the md5sums that we have
-        # are authoritative, so if we don't have any md5sum for this path then
-        # it must be a non-file.
-        must_be_non_file = bool(not must_be_file and pkgname and
-            self.__md5sums_info.has_md5sums(pkgname))
-        # Now check the filetype to the extent that we can.
+      elif expect_file:
         if islink:
-          if must_be_file:
-            print "Symlink %s is supposed to be a file owned by %s" % (path,
-                node.pkgname())
+          if not exists:
+            print "Broken symlink %s is supposed to be a file owned by %s" % (
+                path, node.pkgname())
             self.__discrepancy()
-          else:
-            # No way to know if it should actually be a symlink vs. a directory
-            # or whether the target of the symlink is correct.
-            self.unverifiable_link_count = self.unverifiable_link_count + 1
-            if self.report_unverifiable:
-              print "Skipping unverifiable symbolic link %s owned by %s" % (
-                  path,
-                  node.pkgname())
-        elif isdir:
-          if must_be_file:
-            print "Directory %s is supposed to be a file owned by %s" % (path,
-                node.pkgname())
-            self.__discrepancy()
-          else:
-            # No way to know if it should actually be a directory vs. a symlink
-            # or whether or not the directory should be empty. In practice, an
-            # empty directory is almost always pointless, so any directories at
-            # this point are probably meant to be filled with content that is
-            # created by the app or user after installation. So we don't check
-            # for unowned files within this directory.
-            self.unverifiable_dir_count = self.unverifiable_dir_count + 1
-            if self.report_unverifiable:
-              print "Skipping unverifiable directory %s owned by %s" % (
-                  path,
-                  node.pkgname())
-        elif isfile:
-          if must_be_non_file:
-            print "File %s is supposed to be a non-file owned by %s" % (path,
-                node.pkgname())
-            self.__discrepancy()
-          else:
-            # It is a regular file, so check its content.
-            if not pkgname:
-              # We don't have a way to figure out which md5sum to use when there
-              # are multiple owners.
+          elif isfile:
+            # Symlink-to-file, but expected to be a regular file. This is
+            # somewhat anomalous, but there are packages out there that ship
+            # files and then change them to symlinks in their postinst, so
+            # warn but do not count a discrepancy.
+            print "Warning: Unexpected symlink for file %s owned by %s" % (
+                path, node.pkgname())
+            # If the target of the symlink compares as equal to the expected
+            # content, then we don't count a discrepancy.
+            if node.has_multiple_owners():
+              # We don't have a way to figure out which package to download when
+              # there are multiple owners.
               print ("Skipping file %s because it is owned by multiple packages"
-                  % path)
+                     % path)
               return
-            if (self.ignore_conffiles and
-                self.__conffiles_status.has_conffile(normpath)):
-              self.ignored_conffiles_count = self.ignored_conffiles_count + 1
-              return
-            # This path may not actually be a regular file in the package, but
-            # if so then we will find that out when we diff it.
-            self.__check_file(pkgname, normpath, path)
-        else:
-          # Special file. This is very odd, but technically it's supported by
-          # dpkg.
-          if must_be_file:
-            print ("Special file %s is supposed to be a regular file owned by "
-                "%s") % (path, node.pkgname())
+            self.__check_file_with_md5sum(md5sum, normpath)
+          elif isdir:
+            print ("Symlinked directory %s is supposed to be a file owned by "
+                   "%s") % (path, node.pkgname())
             self.__discrepancy()
           else:
-            # No way to know if it's actually supposed to be a special file, but
-            # it's very likely not. Warn the user but don't count a discrepancy.
-            print "Warning: Special file installed at %s owned by %s" % (
+            print ("Symlinked special file %s is supposed to be a regular "
+                   "file owned by %s") % (path, node.pkgname())
+            self.__discrepancy()
+        elif isfile:
+          if node.has_multiple_owners():
+            # We don't have a way to figure out which package to download when
+            # there are multiple owners.
+            print ("Skipping file %s because it is owned by multiple packages"
+                   % path)
+            return
+          self.__check_file_with_md5sum(md5sum, normpath)
+        elif isdir:
+          print "Directory %s is supposed to be a file owned by %s" % (path,
+              node.pkgname())
+          self.__discrepancy()
+        else:
+          print ("Special file %s is supposed to be a regular file owned by %s"
+                 % (path, node.pkgname()))
+          self.__discrepancy()
+      elif is_obsolete_conffile:
+        # Then it should probably be a regular file, but packages might change
+        # their obsolete conffiles on upgrade, so just warn if the filetype is
+        # wrong. Even if it's a regular file, we don't check its md5sum because
+        # we have no way of downloading the original file to compute a diff.
+        if islink:
+          if not exists:
+            anomalous_type = "broken symlink"
+          elif isfile:
+            anomalous_type = "symlinked file"
+          elif isdir:
+            anomalous_type = "symlinked directory"
+          else:
+            anomalous_type = "symlinked special file"
+        elif isfile:
+          anomalous_type = None
+        elif isdir:
+          anomalous_type = "directory"
+        else:
+          anomalous_type = "special file"
+        if anomalous_type:
+          print "Warning: Obsolete conffile %s owned by %s is a %s" % (path,
+              node.pkgname(), anomalous_type)
+        else:
+          print "Skipping obsolete conffile %s owned by %s" % (path,
+              node.pkgname())
+      else:
+        # Else we have no way of knowing what filetype it should be. The lack
+        # of an md5sum suggests that it is a non-file, but some packages ship
+        # incomplete .md5sums files or no md5sum file at all. The lack of
+        # children suggests that it is a non-directory, but some packages ship
+        # empty directories. So we assume that whatever filetype it has on-disk
+        # is correct. For files, we skip the md5sum stage and download the
+        # owning package to verify them. For other types, we just report that we
+        # can't verify them.
+        if islink:
+          self.unverifiable_link_count = self.unverifiable_link_count + 1
+          if self.report_unverifiable:
+            print "Skipping unverifiable symbolic link %s owned by %s" % (
                 path,
                 node.pkgname())
+        elif isdir:
+          self.unverifiable_dir_count = self.unverifiable_dir_count + 1
+          if self.report_unverifiable:
+            print "Skipping unverifiable directory %s owned by %s" % (
+                path,
+                node.pkgname())
+        elif isfile:
+          if node.has_multiple_owners():
+            # We don't have a way to figure out which package to download when
+            # there are multiple owners.
+            print ("Skipping file %s because it is owned by multiple packages"
+                   % path)
+            return
+          self.__check_file_without_md5sum(normpath)
+        else:
+          # No way to know if it's actually supposed to be a special file, but
+          # it's very likely not. Warn the user but don't count a discrepancy.
+          print "Warning: Special file installed at %s owned by %s" % (
+              path,
+              node.pkgname())
 
-  def __check_file(self, package, normpath, path):
+  def __access(self, normpath):
     if not os.access(normpath, os.R_OK):
-      print >> sys.stderr, "Don't have read permission for " + path
+      print >> sys.stderr, "Don't have read permission for " + normpath
       self.__error()
+      return False
+    return True
+
+  def __check_file_with_md5sum(self, md5sum, normpath):
+    if not self.__access(normpath):
       return
-    # Try to find an md5sum for this file, first from the dpkg status file and
-    # then from the info/*.md5sums file.
-    md5sum = None
-    status = self.__conffiles_status.get_conffile_status(normpath)
-    if status:
-      (md5sum, obsolete) = status
-      if obsolete:
-        # Don't waste time on obsolete conffiles. We could check their md5sum,
-        # but if there is a discrepancy we cannot produce a diff because the
-        # conffile is no longer shipped in its owning package.
-        print "Skipping obsolete conffile %s owned by %s" % (path, package)
-        return
-    if not md5sum:
-      md5sum = self.__md5sums_info.get_md5sum(package, normpath)
-    if not md5sum:
-      # This package does not ship an md5sums file, so we need to bypass the
-      # md5sum verification stage and skip right to downloading the package for
-      # comparison.
-      print >> self.__apt_fetcher_in, normpath
-      self.__apt_fetcher_in.flush()
-    else:
-      # We have the md5sum, so verify it first to avoid having to download
-      # packages in the common case.
-      self.__md5sum_in.write("%s  %s\n" % (md5sum, normpath))
-      self.__md5sum_in.flush()
+    self.__md5sum_in.write("%s  %s\n" % (md5sum, normpath))
+    self.__md5sum_in.flush()
+
+  def __check_file_without_md5sum(self, normpath):
+    if not self.__access(normpath):
+      return
+    print >> self.__apt_fetcher_in, normpath
+    self.__apt_fetcher_in.flush()
 
 def version(fileobj):
   print >> fileobj, "apt-diff " + VERSION
@@ -445,9 +500,9 @@ def usage(fileobj):
 
 def _ensure_dir(path):
   if not os.path.isdir(path):
-    os.mkdir(path, 0700)
+    os.mkdir(path, 0755)
   else:
-    os.chmod(path, 0700)
+    os.chmod(path, 0755)
 
 def main(argv):
   try:
@@ -468,7 +523,8 @@ def main(argv):
            _NO_IGNORE_EXTRAS,
            _NO_OVERRIDE_CACHE,
            _REPORT_UNVERIFIABLE,
-           _TEMPDIR + "="])
+           _TEMPDIR + "=",
+           _NO_REMOVE_EXTRACTED])
     except getopt.GetoptError, err:
       print >> sys.stderr, str(err)
       usage(sys.stderr)
@@ -480,6 +536,7 @@ def main(argv):
                        None)
     no_override_cache = False
     tempdir = None
+    no_remove_extracted = False
     for (opt, arg) in opts:
       opt = opt.lstrip("-")
       if opt == _PACKAGE or opt == _SHORT_PACKAGE:
@@ -505,6 +562,8 @@ def main(argv):
         apt_diff.report_unverifiable = True
       elif opt == _TEMPDIR:
         tempdir = arg
+      elif opt == _NO_REMOVE_EXTRACTED:
+        no_remove_extracted = True
       else:
         # Shouldn't happen because getopt should have thrown an error.
         raise Exception("Unexpected option")
@@ -538,7 +597,8 @@ def main(argv):
     _ensure_dir(extraction_dir)
     apt_diff.extraction_dir = extraction_dir
     apt_diff.execute()
-    # Recursively delete the extracted packages.
-    shutil.rmtree(extraction_dir)
+    if not no_remove_extracted:
+      # Recursively delete the extracted packages.
+      shutil.rmtree(extraction_dir)
   except KeyboardInterrupt:
     return 130

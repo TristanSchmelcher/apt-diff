@@ -18,6 +18,7 @@
 # USA.
 
 import os
+import shutil
 import subprocess
 
 _DPKG_INFO_DIR = "/var/lib/dpkg/info/"
@@ -34,6 +35,9 @@ _DPKG_LIST_FORMAT = _build_format(_LIST_FILE_EXT)
 
 def extract_archive(archive_path, destdir):
   """Extracts an archive file on disk to the given directory."""
+  if os.path.lexists(destdir):
+    # May have been extracted during a previous run. Re-extract cleanly.
+    shutil.rmtree(destdir)
   with open(os.devnull, "r") as devnull:
     subprocess.check_call(["dpkg-deb", "-x", archive_path, destdir],
                           stdin = devnull)
@@ -149,24 +153,25 @@ class MD5SumsInfo:
       except:
         f = None
       if f:
-	package_md5sums = {}
+        package_md5sums = {}
         with f:
-	  for line in f:
-	    if "\n" != line[-1]:
-	      print >> sys.stderr, "Malformed line in %s: %s" % (
-	          md5sums_path,
-	          line)
-	      continue
-	    package_md5sums["/" + line[34:-1]] = line[:32]
+          for line in f:
+            if "\n" != line[-1]:
+              print >> sys.stderr, "Malformed line in %s: %s" % (
+                  md5sums_path,
+                  line)
+              continue
+            filename = "/" + line[34:-1]
+            if filename in package_md5sums:
+              print "Warning: Multiple entries for %s in %s" % (filename,
+                                                                md5sums_path)
+            package_md5sums[filename] = line[:32]
       else:
         package_md5sums = None
       self.__package_md5sums[package] = package_md5sums
     else:
       package_md5sums = self.__package_md5sums[package]
     return package_md5sums
-
-  def has_md5sums(self, package):
-    return None != self.__get_package_md5sums(package)
 
   def get_md5sum(self, package, normpath):
     package_md5sums = self.__get_package_md5sums(package)
@@ -201,27 +206,46 @@ class ConffilesStatus:
         ["dpkg-query", "-f", "${Conffiles}\\n", "-W"] + packages,
         stdout=subprocess.PIPE)
     for line in p.stdout:
-      if "\n" != line[-1]:
-        print >> sys.stderr, "Malformed line in Conffiles field: " + line
-        continue
-      if "\n" == line:
+      line = line.rstrip("\n")
+      if not line:
         # Ignore blank lines.
         continue
-      obsolete = line.endswith(" obsolete\n")
+      # This is reverse-engineered from the f_conffiles() dpkg function in
+      # lib/dpkg/fields.c.
+      pair = line.rsplit(' ', 1)
+      if len(pair) != 2:
+        print >> sys.stderr, "Malformed line in Conffiles field: " + line
+        continue
+      obsolete = pair[1] == "obsolete"
       if obsolete:
-        trim = 9
-      else:
-        trim = 0
-      filename = line[1:-34 - trim]
-      md5sum = line[-33 - trim:-1 - trim]
-      self.__conffiles[filename] = (md5sum, obsolete)
+        pair = pair[0].rsplit(' ', 1)
+        if len(pair) != 2:
+          print >> sys.stderr, "Malformed line in Conffiles field: " + line
+          continue
+      filename = pair[0][1:]
+      md5sum = pair[1]
+      if md5sum == "newconffile":
+        # It's not clear what this means or why it occurs.
+        print ("Warning: Ignoring Conffiles line with hash of \"newconffile\": "
+               + line)
+        continue
+      if len(md5sum) != 32:
+        print "Warning: Ignoring malformed Conffiles line: " + line
+        continue
+      status = (md5sum, obsolete)
+      # It would be nice to verify here that we don't have a conflicting status
+      # already, but we often do. :/
+      self.__conffiles[filename] = status
 
-  def has_conffile(self, normpath):
+  def is_conffile(self, normpath):
     return normpath in self.__conffiles
 
-  def get_conffile_status(self, normpath):
-    if not self.has_conffile(normpath):
-      # Either not a conffile or not loaded.
+  def is_obsolete_conffile(self, normpath):
+    if not self.is_conffile(normpath):
+      return False
+    return self.__conffiles[normpath][1]
+
+  def get_md5sum(self, normpath):
+    if not self.is_conffile(normpath):
       return None
-    else:
-      return self.__conffiles[normpath]
+    return self.__conffiles[normpath][0]
