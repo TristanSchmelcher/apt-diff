@@ -1,5 +1,3 @@
-# Tools to manage a poll-loop in Python.
-#
 # Copyright (c) 2010 Tristan Schmelcher <tristan_schmelcher@alumni.uwaterloo.ca>
 #
 # This program is free software; you can redistribute it and/or
@@ -17,6 +15,8 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301,
 # USA.
 
+"""Tools to manage a poll-loop in Python."""
+
 import fcntl
 import os
 import select
@@ -26,24 +26,30 @@ import sys
 _READ_SIZE = 4096
 
 class Poller:
+  """Poll-loop management class."""
+
   def __init__(self):
     self.__poll = select.poll()
     self.__map = {}
 
   def register(self, fileobj, event, handler_function):
+    """Register a listener for events on a file object."""
     self.__poll.register(fileobj, event)
     self.__map[fileobj.fileno()] = handler_function
 
   def unregister(self, fileobj):
+    """Unregister the listener for a file object."""
     del self.__map[fileobj.fileno()]
     self.__poll.unregister(fileobj)
 
   def poll(self, timeout=None):
+    """Execute one poll iteration."""
     for fileno, event in self.__poll.poll(timeout):
       # Call handler
       self.__map[fileno](fileno, event)
 
   def has_pollers(self):
+    """Check if there are any listeners registered."""
     return bool(self.__map)
 
 def _set_non_blocking(f):
@@ -53,6 +59,8 @@ def _set_non_blocking(f):
   fcntl.fcntl(fileno, fcntl.F_SETFL, flags)
 
 class LineSource:
+  """Event-driven line-oriented read."""
+
   def __init__(self, fileobj, poller, consumer_function, close_function=None):
     self.__fileobj = fileobj
     self.__poller = poller
@@ -80,14 +88,16 @@ class LineSource:
       return
     # Else it has more data.
     self.__partial_input += text
-    nl = self.__partial_input.rfind("\n")
-    if -1 != nl:
+    last_newline = self.__partial_input.rfind("\n")
+    if -1 != last_newline:
       # Have complete line(s) to pass to the consumer
-      nl = nl + 1
-      self.__consumer_function(self, self.__partial_input[:nl])
-      self.__partial_input = self.__partial_input[nl:]
+      last_newline = last_newline + 1
+      self.__consumer_function(self, self.__partial_input[:last_newline])
+      self.__partial_input = self.__partial_input[last_newline:]
 
 class LineSink:
+  """Event-driven line-oriented write."""
+
   def __init__(self, fileobj, poller):
     self.__fileobj = fileobj
     self.__poller = poller
@@ -114,9 +124,11 @@ class LineSink:
         self.__fileobj.close()
 
   def has_data_pending(self):
-    return "" != self.__partial_output
+    """Check if there is pending data to be written."""
+    return bool(self.__partial_output)
 
   def write_lines(self, lines):
+    """Write lines asynchronously."""
     if self.__closed:
       return
     had_pending = self.has_data_pending()
@@ -128,6 +140,7 @@ class LineSink:
                              self.__on_pollout)
 
   def close(self):
+    """Close the file object asynchronously after all data is written."""
     if self.__closed:
       return
     self.__closed = True

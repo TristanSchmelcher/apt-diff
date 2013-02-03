@@ -1,5 +1,3 @@
-# Helper function to launch child Python processes.
-#
 # Copyright (c) 2010 Tristan Schmelcher <tristan_schmelcher@alumni.uwaterloo.ca>
 #
 # This program is free software; you can redistribute it and/or
@@ -17,10 +15,13 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301,
 # USA.
 
+"""Helper function to launch child Python processes."""
+
 import os
 import sys
 
 def launch(function, input_read_handles, close_in_child):
+  """Launch a child process to run the given function."""
   (out_read, out_write) = os.pipe()
   if os.fork() == 0:
     # Child.
@@ -46,7 +47,7 @@ def launch(function, input_read_handles, close_in_child):
         print >> sys.stderr, e.code
     except BaseException, e:
       print >> sys.stderr, "Exception while executing child: %s: %s" % (type(e),
-          e)
+                                                                        e)
       exitcode = 1
     finally:
       os._exit(exitcode)

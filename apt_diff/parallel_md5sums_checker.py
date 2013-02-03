@@ -1,6 +1,3 @@
-# A helper process for executing md5sum checks for many files in parallel
-# across different processes.
-#
 # Copyright (c) 2010 Tristan Schmelcher <tristan_schmelcher@alumni.uwaterloo.ca>
 #
 # This program is free software; you can redistribute it and/or
@@ -18,10 +15,14 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301,
 # USA.
 
-import distributor
-import launch_helper
-import md5sums_checker
+"""A helper process for executing md5sum checks for many files in parallel
+across different processes."""
+
 import os
+
+from apt_diff import distributor
+from apt_diff import launch_helper
+from apt_diff import md5sums_checker
 
 def _spawner():
   (in_read, in_write) = os.pipe()
@@ -29,4 +30,5 @@ def _spawner():
   return (os.fdopen(in_write, "w"), os.fdopen(out_read, "r"))
 
 def run(input_files, output_file):
+  """Run this pipeline element."""
   distributor.run(input_files[0], output_file, _spawner)

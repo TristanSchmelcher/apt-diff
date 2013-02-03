@@ -1,5 +1,3 @@
-# Helper routines for interacting with dpkg.
-#
 # Copyright (c) 2010 Tristan Schmelcher <tristan_schmelcher@alumni.uwaterloo.ca>
 #
 # This program is free software; you can redistribute it and/or
@@ -17,9 +15,12 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301,
 # USA.
 
+"""Helper routines for interacting with dpkg."""
+
 import os
 import shutil
 import subprocess
+import sys
 
 
 _DPKG_INFO_DIR = "/var/lib/dpkg/info/"
@@ -109,10 +110,10 @@ class PathFilter:
       current = self.__paths
       for component in _path_components(p):
         if component not in current:
-          next = current[component] = {}
+          next_dict = current[component] = {}
         else:
-          next = current[component]
-        current = next
+          next_dict = current[component]
+        current = next_dict
 
   def includes(self, p):
     """Checks if this filter includes the given path."""
@@ -185,18 +186,22 @@ class FilesystemNode:
     return pkg_info
 
   def owners(self):
+    """Gets the owners as an array."""
     return self.__owners
 
   def owners_str(self):
+    """Gets the owners as a human-readable string."""
     if self.__owners:
       return ", ".join(self.__owners)
     else:
       return "no package"
 
   def children(self):
+    """Gets the map of child nodes."""
     return self.__children
 
   def package_info(self):
+    """Gets the map of package information."""
     return self.__package_info
 
 
@@ -206,6 +211,7 @@ def _bad_conffiles_line(package, line):
 
 
 class DpkgHelper:
+  """Class for loading dpkg state."""
 
   def __init__(self, path_filter):
     self.__root = FilesystemNode()
@@ -237,7 +243,7 @@ class DpkgHelper:
         node = self.__get_node(normpath, True)
         if pkgname in node.owners():
           print >> sys.stderr, "Got redundant entry for %s in %s" % (normpath,
-              path)
+                                                                     path)
           continue
         node._record_owner(pkgname)
 
@@ -252,7 +258,7 @@ class DpkgHelper:
         pkg_info = self.__get_node(normpath, True)._get_package_info(pkgname)
         if pkg_info._md5sum:
           print >> sys.stderr, "Got redundant entry for %s in %s" % (normpath,
-              path)
+                                                                     path)
         pkg_info._md5sum = md5sum
 
   def __load_conffiles(self):
@@ -279,7 +285,7 @@ class DpkgHelper:
         if not package:
           # Got conffile line before first package line. Should not happen.
           print >> sys.stderr, ("Got malformed line in dpkg-query output: " +
-              line)
+                                line)
           continue
         # This is reverse-engineered from the f_conffiles() dpkg function in
         # lib/dpkg/fields.c.
@@ -300,7 +306,7 @@ class DpkgHelper:
         if md5sum == "newconffile":
           # It's not clear what this means or why it occurs.
           print ("Warning: Ignoring Conffiles line for package %s with hash of "
-              "\"newconffile\": %s" % (package, line))
+                 "\"newconffile\": %s" % (package, line))
           continue
         if len(md5sum) != 32:
           _bad_conffiles_line(package, line)
@@ -314,7 +320,7 @@ class DpkgHelper:
         pkg_info._conffile_status = status
     if p.wait():
       print >> sys.stderr, ("dpkg-query failed with exit status %s" %
-          p.returncode)
+                            p.returncode)
 
   def __get_node(self, normpath, create):
     node = self.__root
@@ -328,6 +334,7 @@ class DpkgHelper:
     return node
 
   def lookup(self, normpath):
+    """Lookup and return the dpkg state for the given path."""
     if not self.__path_filter.includes(normpath):
       # We didn't load info for this path.
       raise Exception("Filter excluded path " + normpath)

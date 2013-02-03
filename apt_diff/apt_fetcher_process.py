@@ -1,5 +1,3 @@
-# A helper process for downloading the packages to be diff'ed.
-#
 # Copyright (c) 2010 Tristan Schmelcher <tristan_schmelcher@alumni.uwaterloo.ca>
 #
 # This program is free software; you can redistribute it and/or
@@ -17,10 +15,15 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301,
 # USA.
 
-import pollingtools
+"""A helper process for downloading the packages to be diff'ed."""
+
 import sys
 
+from apt_diff import pollingtools
+
 class AptFetcher:
+  """Processing pipeline element for fetching packages via APT."""
+
   def __init__(self, apt_helper):
     self.__apt_helper = apt_helper
     self.__pkg_paths = {}
@@ -58,6 +61,7 @@ class AptFetcher:
       self.__fetch_package(pkgname, filename)
 
   def run(self, input_files, output_file):
+    """Run this pipeline element."""
     failed_md5sums_input_file = input_files[0]
     missing_md5sums_input_file = input_files[1]
     self.__output_file = output_file

@@ -1,6 +1,3 @@
-# A helper process for unpacking downloaded packages and diff'ing the files in
-# them to the ones on disk.
-#
 # Copyright (c) 2010 Tristan Schmelcher <tristan_schmelcher@alumni.uwaterloo.ca>
 #
 # This program is free software; you can redistribute it and/or
@@ -18,13 +15,19 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301,
 # USA.
 
-import dpkg_helper
+"""A helper process for unpacking downloaded packages and diff'ing the files in
+them to the ones on disk."""
+
 import os
 import subprocess
 import sys
 
+from apt_diff import dpkg_helper
+
 def create(extraction_dir):
+  """Creates a processing pipeline function for running diff."""
   def run(input_files, output_file):
+    """Run this pipeline element."""
     input_file = input_files[0]
     discrepancies = 0
     for line in input_file:

@@ -1,5 +1,3 @@
-# A helper class that provides APT package fetching functionality.
-#
 # Copyright (c) 2010 Tristan Schmelcher <tristan_schmelcher@alumni.uwaterloo.ca>
 #
 # This program is free software; you can redistribute it and/or
@@ -17,19 +15,26 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301,
 # USA.
 
+"""Helpers that wrap APT functionality."""
+
 import apt
 import apt_pkg
 import os
 import sys
 
 def initialize():
+  """Initialize the apt_pkg module. Must be called before using anything else in
+     this class."""
   apt_pkg.InitConfig()
   apt_pkg.InitSystem()
 
 def set_option(name, value):
+  """Set an arbitrary APT option."""
   apt_pkg.Config.Set(name, value)
 
 class AptHelper:
+  """Wrapper for the APT cache's state and package downloading capability."""
+
   def __init__(self):
     # Have to explicitly create an unused OpProgress or else GetCache()
     # does text progress logging by default.
@@ -40,6 +45,7 @@ class AptHelper:
     self.__src_list.ReadMainList()
 
   def is_installed(self, pkgname):
+    """Checks if the given package is installed."""
     return pkgname in self.__cache and bool(self.__cache[pkgname].CurrentVer)
 
   def fetch_archive(self, pkgname):
@@ -56,15 +62,15 @@ class AptHelper:
         # Package is installed. Diff against the same version.
         # First check if this version is available in the repo.
         available = False
-        for package_file, index in ver.FileList:
+        for package_file, _ in ver.FileList:
           if package_file.NotSource == 0:
             available = True
             break
         if not available:
           # Nope.
           print >> sys.stderr, ("Can't fetch package %s because the installed "
-              "version (%s) is not available in the archives"
-              % (pkgname, ver.VerStr))
+                                "version (%s) is not available in the archives"
+                                % (pkgname, ver.VerStr))
           return None
         self.__dep_cache.SetCandidateVer(pkg, ver)
         self.__dep_cache.SetReInstall(pkg, True)
@@ -74,15 +80,15 @@ class AptHelper:
         ver = self.__dep_cache.GetCandidateVer(pkg)
         if not ver:
           print >> sys.stderr, ("Can't fetch package %s because it is not "
-              "installed and there is no installation candidate available in "
-              "the archives" % pkgname)
+                                "installed and there is no installation "
+                                "candidate available in the archives" % pkgname)
           return None
         self.__dep_cache.MarkInstall(pkg, False)
       fetcher = apt_pkg.GetAcquire()
-      pm = apt_pkg.GetPackageManager(self.__dep_cache)
+      pkg_man = apt_pkg.GetPackageManager(self.__dep_cache)
       # Return value from this seems to be meaningless, since I get
       # ResultFailed even when everything works.
-      pm.GetArchives(fetcher, self.__src_list, self.__pkg_records)
+      pkg_man.GetArchives(fetcher, self.__src_list, self.__pkg_records)
       fetcher.Run()
       # There may be multiple items in the case of a multi-arch package where
       # both architectures are installed (they must be reinstalled in tandem).
@@ -100,15 +106,15 @@ class AptHelper:
             # Found it.
             if item.Status != apt_pkg.AcquireItem.StatDone:
               print >> sys.stderr, ("Failed to fetch package %s: %s" %
-                  (pkgname, item.ErrorText))
+                                    (pkgname, item.ErrorText))
               return None
             return item.DestFile
       # We didn't find any downloaded file that looks like the package.
       raise Exception("Couldn't find package file for %s in fetcher items list"
-          % pkgname)
+                      % pkgname)
     except Exception, e:
       print >> sys.stderr, "Failed to fetch package %s: %s: %s" % (pkgname,
-          type(e), e)
+                                                                   type(e), e)
       return None
     finally:
       # Revert the change (so as to not do a cumulative fetch in each

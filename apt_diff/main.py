@@ -1,5 +1,3 @@
-# Diff filesystem content against the APT installation sources.
-#
 # Copyright (c) 2010 Tristan Schmelcher <tristan_schmelcher@alumni.uwaterloo.ca>
 #
 # This program is free software; you can redistribute it and/or
@@ -17,23 +15,26 @@
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301,
 # USA.
 
+"""Diff filesystem content against the APT installation sources."""
+
 import warnings
 warnings.filterwarnings("ignore", "apt API not stable yet",
                         FutureWarning)
 
-import apt_fetcher_process
-import apt_helper
-import differ_process
-import dpkg_helper
 import getopt
-import launch_helper
 import os
-import parallel_md5sums_checker
 import shutil
 import stat
 import sys
 import tempfile
 import time
+
+from apt_diff import apt_fetcher_process
+from apt_diff import apt_helper
+from apt_diff import differ_process
+from apt_diff import dpkg_helper
+from apt_diff import launch_helper
+from apt_diff import parallel_md5sums_checker
 
 VERSION = "0.9.6"
 
@@ -100,6 +101,7 @@ def _launch_pipeline(apt_helper, extraction_dir):
           os.fdopen(differ_out_read, "r"))
 
 class AptDiff:
+  """Class for managing the APT diff workflow."""
 
   def __init__(self,
                ignore_conffiles,
@@ -119,10 +121,12 @@ class AptDiff:
     self.__paths = []
 
   def check_path(self, path):
+    """Diff a path (recursively)."""
     normpath = os.path.normpath(os.path.join(os.getcwd(), path))
     self.__paths.append(normpath)
 
   def check_package(self, pkgname):
+    """Diff all leaf paths owned by a package (recursively)."""
     paths = dpkg_helper.expand_package_to_leaf_paths(pkgname)
     if not paths:
       print "Package %s does not own any installed paths" % pkgname
@@ -130,6 +134,7 @@ class AptDiff:
     self.__paths.extend(paths)
 
   def execute(self):
+    """Execute the diff workflow."""
     time1 = time.time()
     self.__dpkg_helper = dpkg_helper.DpkgHelper(dpkg_helper.PathFilter(
         self.__paths))
@@ -152,20 +157,20 @@ class AptDiff:
     # Wait for all summing to be finished and the count of modified files to be
     # available.
     self.discrepancy_count = (self.discrepancy_count +
-        int(self.__differ_out.readline()))
+                              int(self.__differ_out.readline()))
     self.__differ_out.close()
     # Summarize findings.
     print "--------------------------------"
     print ("Found %d differences between filesystem state and package state" %
-        self.discrepancy_count)
+           self.discrepancy_count)
     if 0 != self.error_count:
       print ("Encountered %d errors that prevented a complete check" %
-          self.error_count)
+             self.error_count)
     if 0 != self.ignored_conffiles_count:
       print "Ignored %d conffiles" % self.ignored_conffiles_count
     if 0 != self.ignored_extras_count:
       print ("Ignored %d extra paths not owned by any package" %
-          self.ignored_extras_count)
+             self.ignored_extras_count)
     if 0 != self.unverifiable_dir_count:
       print "Skipped %d unverifiable directories" % self.unverifiable_dir_count
     if 0 != self.unverifiable_link_count:
@@ -315,7 +320,8 @@ class AptDiff:
         elif isfile:
           self.__check_file(normpath, node)
         elif isdir:
-          print "Directory %s is supposed to be a file owned by %s" % (path,
+          print "Directory %s is supposed to be a file owned by %s" % (
+              path,
               node.owners_str())
           self.__discrepancy()
         else:
@@ -375,7 +381,7 @@ class AptDiff:
     for pkgname in node.owners():
       if pkgname in node.package_info():
         self.__check_file_with_package_info(md5sums_so_far, normpath, pkgname,
-            node.package_info()[pkgname])
+                                            node.package_info()[pkgname])
       else:
         # No md5sum for this file in this package. Have to download it.
         self.__check_file_without_md5sum(normpath, pkgname)
@@ -385,7 +391,8 @@ class AptDiff:
       if pkgname in node.owners():
         continue
       pkg_info = node.package_info()[pkgname]
-      if pkg_info.conffile_status() and (pkg_info.conffile_status()[1] or
+      if pkg_info.conffile_status() and (
+          pkg_info.conffile_status()[1] or
           not self.__apt_helper.is_installed(pkgname)):
         # It is normal to have a conffile status for a file we don't own if
         # either it's an obsolete conffile or the package has been
@@ -400,12 +407,12 @@ class AptDiff:
       print "Warning: Package %s has md5sum for file %s not owned by it" % (
           pkgname, normpath)
       self.__check_file_with_package_info(md5sums_so_far, normpath, pkgname,
-          pkg_info)
+                                          pkg_info)
     # Report conflicting md5sums.
     if len(md5sums_so_far) > 1:
       # This may be due to dpkg-divert. Ideally we should check for diversions.
       print ("Warning: Conflicting md5sums for file %s in different packages: "
-          "%s" % (normpath, md5sums_so_far))
+             "%s" % (normpath, md5sums_so_far))
 
   def __check_file_with_package_info(self, md5sums_so_far, normpath, pkgname,
       pkg_info):
@@ -419,8 +426,8 @@ class AptDiff:
     if (pkg_info.md5sum() and pkg_info.conffile_status() and
         pkg_info.md5sum() != pkg_info.conffile_status()[0]):
       print ("Warning: Package %s has conflicting md5sums for %s: %s vs. %s"
-          % (pkgname, normpath, pkg_info.md5sum(),
-             pkg_info.conffile_status()[0]))
+             % (pkgname, normpath, pkg_info.md5sum(),
+                pkg_info.conffile_status()[0]))
     # Arbitrarily prefer the .md5sums value over the conffiles value.
     if pkg_info.md5sum():
       md5sum = pkg_info.md5sum()
@@ -445,23 +452,28 @@ class AptDiff:
     self.__apt_fetcher_in.flush()
 
 def version(fileobj):
+  """Write out the program's version."""
   print >> fileobj, "apt-diff " + VERSION
 
 def usage(fileobj):
+  """Write out the program's usage."""
   version(fileobj)
   print >> fileobj, _USAGE
 
 def _ensure_dir(path):
+  """Ensure that the given directory is owned by this user and is writeable
+     by us only."""
   if not os.path.isdir(path):
     os.mkdir(path, 0755)
   else:
     os.chmod(path, 0755)
 
-def main(argv):
+def main(args):
+  """main() for apt-diff."""
   try:
     try:
       opts, args = getopt.getopt(
-          argv,
+          args,
           _SHORT_PACKAGE + ":" +
           _SHORT_PATH + ":" +
           _SHORT_APT_OPTION + ":" +

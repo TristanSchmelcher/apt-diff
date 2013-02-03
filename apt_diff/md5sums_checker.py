@@ -1,5 +1,3 @@
-# Python implementation of "md5sum --quiet -c"
-#
 # Copyright (c) 2010 Tristan Schmelcher <tristan_schmelcher@alumni.uwaterloo.ca>
 #
 # This program is free software; you can redistribute it and/or
@@ -16,6 +14,8 @@
 # along with this program; if not, write to the Free Software
 # Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301,
 # USA.
+
+"""Python implementation of "md5sum --quiet -c"."""
 
 import hashlib
 import mmap
@@ -54,7 +54,7 @@ def _compute_md5_by_mmap(filename):
 def _compute_md5(filename):
   try:
     return _compute_md5_by_mmap(filename)
-  except Exception:
+  except:
     # Silently fall back to a non-mmap'ed approach (mmap may fail for large
     # files on 32-bit machines).
     return _compute_md5_by_syscalls(filename)
@@ -64,6 +64,7 @@ def _verify_md5(filename, expected_md5):
   return actual_md5 == expected_md5
 
 def run(input_files, output_file):
+  """Run this pipeline element."""
   for line in input_files[0]:
     line = line.rstrip('\n')
     parts = line.split(' ', 2)
