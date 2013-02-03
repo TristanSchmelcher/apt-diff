@@ -1,8 +1,9 @@
-apt-diff (0.9.6) natty; urgency=low
+apt-diff (0.9.6) precise; urgency=low
 
   * More robust filetype checks.
+  * Multi-arch support.
 
- -- Tristan Schmelcher <tristan_schmelcher@alumni.uwaterloo.ca>  Sun, 18 Nov 2012 17:04:13 -0800
+ -- Tristan Schmelcher <tristan_schmelcher@alumni.uwaterloo.ca>  Sat, 02 Feb 2013 18:11:07 -0800
 
 apt-diff (0.9.5) natty; urgency=low
 
