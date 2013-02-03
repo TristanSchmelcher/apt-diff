@@ -21,231 +21,314 @@ import os
 import shutil
 import subprocess
 
+
 _DPKG_INFO_DIR = "/var/lib/dpkg/info/"
 _LIST_FILE_EXT = ".list"
-_MD5SUMS_FILE_EXT = ".md5sums"
 _LIST_FILE_EXT_LEN = len(_LIST_FILE_EXT)
-_MULTIPLE = "(multiple packages)"
+_MD5SUMS_FILE_EXT = ".md5sums"
+_MD5SUMS_FILE_EXT_LEN = len(_MD5SUMS_FILE_EXT)
+_MORE_PACKAGES = "..."
+_MAX_DIR_OWNERS_TO_RECORD = 3
 
-def _build_format(ext):
-  return ''.join((_DPKG_INFO_DIR, "%s", ext))
-
-_DPKG_MD5SUMS_FORMAT = _build_format(_MD5SUMS_FILE_EXT)
-_DPKG_LIST_FORMAT = _build_format(_LIST_FILE_EXT)
 
 def extract_archive(archive_path, destdir):
   """Extracts an archive file on disk to the given directory."""
   if os.path.lexists(destdir):
     # May have been extracted during a previous run. Re-extract cleanly.
     shutil.rmtree(destdir)
-  with open(os.devnull, "r") as devnull:
+  with open(os.devnull) as devnull:
     subprocess.check_call(["dpkg-deb", "-x", archive_path, destdir],
                           stdin = devnull)
 
-class FilesystemNode:
-  """A FilesystemNode is a representation of a file or directory entry from a
-     .list or .conffiles file."""
+
+def expand_package_to_leaf_paths(pkgname):
+  """Expands a package name to all leaf paths owned by it.
+
+  Returns an array of all leaf paths owned by pkgname. A leaf path is defined as
+  a path for which the package does not own any subpath.
+  """
+  listpath = _DPKG_INFO_DIR + pkgname + _LIST_FILE_EXT
+  paths = []
+  if not os.path.lexists(listpath):
+    return paths
+  lines = []
+  with open(listpath) as f:
+    for line in f:
+      line = line.rstrip("\n")
+      if line == "/.":
+        line = "/"
+      lines.append(line)
+  lines.sort()
+  lines.reverse()
+  last = None
+  for line in lines:
+    if last and last.startswith(line):
+      continue
+    last = line
+    paths.append(line)
+  paths.reverse()
+  return paths
+
+
+def _path_components(normpath):
+  """Gets a list of the path components in a normalized path."""
+  if normpath == "/":
+    # The code below would return [''], which is not what we want for the root.
+    return []
+  else:
+    return normpath.lstrip("/").split("/")
+
+
+class PathFilter:
+  """A PathFilter represents a set of paths to filter.
+
+  The paths that will be diff'ed are specified as an argument. The filter
+  includes precisely all paths that are equal or are subpaths.
+  """
+
+  def __init__(self, paths):
+    # We store the filter as a tree of the outermost paths (i.e., paths that are
+    # not subpaths of any other path in the filter). Non-outermost paths are
+    # superfluous because all subpaths are automatically included.
+    # First identify the outermost paths.
+    paths = sorted(paths)
+    last = None
+    outermost_paths = []
+    for p in paths:
+      if last and p.startswith(last):
+        continue
+      last = p
+      outermost_paths.append(p)
+    # Now build the tree.
+    if not outermost_paths:
+      # Special case where no paths were specified.
+      self.__paths = None
+      return
+    self.__paths = {}
+    for p in outermost_paths:
+      current = self.__paths
+      for component in _path_components(p):
+        if component not in current:
+          next = current[component] = {}
+        else:
+          next = current[component]
+        current = next
+
+  def includes(self, p):
+    """Checks if this filter includes the given path."""
+    current = self.__paths
+    if current == None:
+      # Special case where no paths were specified.
+      return False
+    for component in _path_components(p):
+      if component not in current:
+        # If no more components, then this is an included path and we're a
+        # subpath of it. Otherwise, we're not an included path.
+        return not current
+      current = current[component]
+    # If we found all nodes, then either this is a parent of an included path or
+    # exactly equal to an included path. The latter is the case whenever there
+    # are no more children.
+    return not current
+
+
+class PackageInfo:
+  """A PackageInfo represents the per-package info for a FilesystemNode."""
 
   def __init__(self):
-    self.__children = None
-    self.__pkgname = None
+    self._md5sum = None
+    self._conffile_status = None
 
-  def __record_owner(self, pkgname):
-    if not self.__pkgname:
-      self.__pkgname = pkgname
-    elif self.__pkgname != pkgname:
-      self.__pkgname = _MULTIPLE
+  def md5sum(self):
+    """Gets the md5sum specified in the .md5sums file, if any."""
+    return self._md5sum
 
-  def __add_child(self, name):
-    if not self.__children:
-      self.__children = {}
-    child = FilesystemNode()
-    self.__children[name] = child
+  def conffile_status(self):
+    """Gets the conffile status, if any.
+
+    The conffile status is specified in the Conffiles field of the dpkg status
+    file. The return value is None if there is no Conffiles entry for this file
+    in this package, else a 2-tuple of md5sum and a boolean obsolete flag.
+    """
+    return self._conffile_status
+
+
+class FilesystemNode:
+  """A FilesystemNode is a representation of the dpkg info for a path."""
+
+  def __init__(self):
+    self.__owners = []
+    self.__children = {}
+    self.__package_info = {}
+
+  def _record_owner(self, pkgname):
+    if self.__children and len(self.__owners) >= _MAX_DIR_OWNERS_TO_RECORD:
+      # Cap the number of recorded owners for directories since that info is
+      # only used for logging and there could be thousands.
+      if len(self.__owners) == _MAX_DIR_OWNERS_TO_RECORD:
+        self.__owners.append(_MORE_PACKAGES)
+      return
+    self.__owners.append(pkgname)
+
+  def _add_child(self, name):
+    if not self.__children and len(self.__owners) > _MAX_DIR_OWNERS_TO_RECORD:
+      # This is now a directory, so discard owner info above the cap.
+      del self.__owners[_MAX_DIR_OWNERS_TO_RECORD:]
+      self.__owners.append(_MORE_PACKAGES)
+    child = self.__children[name] = FilesystemNode()
     return child
 
-  def __load_list(self, path, pkgname, include_paths):
-    with open(path) as fileobj:
-      for line in fileobj:
-        if include_paths:
-          # See if this path is a child of one of the listed ones.
-          include = False
-          for include_path in include_paths:
-            if line.startswith(include_path):
-              include = True
-              break
-          if not include:
-            continue
-        normpath = line.rstrip("\n")
-        if normpath == "/.":
-          # Special case for the root directory.
-          components = []
-        else:
-          components = normpath.lstrip("/").split("/")
-        current = self
-        for component in components:
-          current.__record_owner(pkgname)
-          child = current.find_child(component)
-          if not child:
-            child = current.__add_child(component)
-          current = child
-        current.__record_owner(pkgname)
+  def _get_package_info(self, pkgname):
+    if pkgname in self.__package_info:
+      return self.__package_info[pkgname]
+    pkg_info = self.__package_info[pkgname] = PackageInfo()
+    return pkg_info
 
-  def has_children(self):
-    return bool(self.__children)
+  def owners(self):
+    return self.__owners
+
+  def owners_str(self):
+    if self.__owners:
+      return ", ".join(self.__owners)
+    else:
+      return "no package"
 
   def children(self):
     return self.__children
 
-  def pkgname(self):
-    return self.__pkgname
+  def package_info(self):
+    return self.__package_info
 
-  def find_child(self, name):
-    if not self.__children:
-      return None
-    else:
-      return self.__children.get(name)
 
-  def has_multiple_owners(self):
-    return self.pkgname() == _MULTIPLE
+def _bad_conffiles_line(package, line):
+  print >> sys.stderr, ("Got malformed Conffiles line for package %s: %s" %
+      (package, line))
 
-  """The remaining methods below are all intended for use on the root node
-     only."""
 
-  def lookup(self, normpath):
-    if normpath == "/":
-      # Special case for the root directory.
-      components = []
-    else:
-      components = normpath.lstrip("/").split("/")
-    node = self
-    last_node = None
-    for component in components:
-      last_node = node
-      node = node.find_child(component)
-      if not node:
-        break
-    return (last_node, node)
+class DpkgHelper:
 
-  def load_files_for_pkgname(self, pkgname):
-    filename = _DPKG_LIST_FORMAT % pkgname
-    if os.access(filename, os.F_OK):
-      self.__load_list(filename, pkgname, None)
+  def __init__(self, path_filter):
+    self.__root = FilesystemNode()
+    self.__path_filter = path_filter
+    self.__load()
 
-  def load_files_for_paths(self, paths):
+  def __load(self):
+    # Load info from the dpkg info directory.
     for filename in os.listdir(_DPKG_INFO_DIR):
       if filename.endswith(_LIST_FILE_EXT):
         pkgname = filename[:-_LIST_FILE_EXT_LEN]
-        self.__load_list(_DPKG_INFO_DIR + filename, pkgname, paths)
+        self.__load_list(_DPKG_INFO_DIR + filename, pkgname)
+      elif filename.endswith(_MD5SUMS_FILE_EXT):
+        pkgname = filename[:-_MD5SUMS_FILE_EXT_LEN]
+        self.__load_md5sums(_DPKG_INFO_DIR + filename, pkgname)
+    # Load conffiles info from the dpkg status file.
+    self.__load_conffiles()
 
-class MD5SumsInfo:
-  """An MD5SumsInfo is an accessor for the information stored in dpkg's
-     info/*.md5sums files."""
+  def __load_list(self, path, pkgname):
+    with open(path) as f:
+      for line in f:
+        line = line.rstrip("\n")
+        if line == "/.":
+          normpath = "/"
+        else:
+          normpath = line
+        if not self.__path_filter.includes(normpath):
+          continue
+        node = self.__get_node(normpath, True)
+        if pkgname in node.owners():
+          print >> sys.stderr, "Got redundant entry for %s in %s" % (normpath,
+              path)
+          continue
+        node._record_owner(pkgname)
 
-  def __init__(self):
-    self.__package_md5sums = {}
+  def __load_md5sums(self, path, pkgname):
+    with open(path) as f:
+      for line in f:
+        line = line.rstrip("\n")
+        normpath = "/" + line[34:]
+        if not self.__path_filter.includes(normpath):
+          continue
+        md5sum = line[:32]
+        pkg_info = self.__get_node(normpath, True)._get_package_info(pkgname)
+        if pkg_info._md5sum:
+          print >> sys.stderr, "Got redundant entry for %s in %s" % (normpath,
+              path)
+        pkg_info._md5sum = md5sum
 
-  def __get_package_md5sums(self, package):
-    if package not in self.__package_md5sums:
-      # Haven't loaded this md5sums file yet. Do it now.
-      md5sums_path = _DPKG_MD5SUMS_FORMAT % package
-      try:
-        f = open(md5sums_path, "r")
-      except:
-        f = None
-      if f:
-        package_md5sums = {}
-        with f:
-          for line in f:
-            if "\n" != line[-1]:
-              print >> sys.stderr, "Malformed line in %s: %s" % (
-                  md5sums_path,
-                  line)
-              continue
-            filename = "/" + line[34:-1]
-            if filename in package_md5sums:
-              print "Warning: Multiple entries for %s in %s" % (filename,
-                                                                md5sums_path)
-            package_md5sums[filename] = line[:32]
-      else:
-        package_md5sums = None
-      self.__package_md5sums[package] = package_md5sums
-    else:
-      package_md5sums = self.__package_md5sums[package]
-    return package_md5sums
-
-  def get_md5sum(self, package, normpath):
-    package_md5sums = self.__get_package_md5sums(package)
-    if not package_md5sums or normpath not in package_md5sums:
-      # Either this package does not ship an md5sums file or it does but doesn't
-      # contain an md5sum for this file.
-      return None
-    else:
-      return package_md5sums[normpath]
-
-class ConffilesStatus:
-  """An MD5SumsInfo is an accessor for the Conffiles fields stored in dpkg's
-     status file."""
-
-  def __init__(self):
-    self.__conffiles = {}
-
-  def load_conffiles_for_packages(self, packages):
-    """Loads the list of conffiles owned by the given packages. If None, it
-       loads the conffiles for all packages."""
-    if None != packages and not packages:
-      # With an empty list of packages, dpkg-query will query every package, but
-      # we want to query none at all, so just return.
-      return
-    if None == packages:
-      packages = []
+  def __load_conffiles(self):
     # Annoyingly, the conffiles entries do not have a newline on the last line,
     # so we ask dpkg-query to add one. Unfortunately this means that an empty
     # entry will become a one-line entry, so we ignore blank lines in the
     # output.
     p = subprocess.Popen(
-        ["dpkg-query", "-f", "${Conffiles}\\n", "-W"] + packages,
+        ["dpkg-query", "-f=${binary:Package}\\n${Conffiles}\\n", "-W"],
         stdout=subprocess.PIPE)
+    package = None
     for line in p.stdout:
       line = line.rstrip("\n")
       if not line:
         # Ignore blank lines.
         continue
-      # This is reverse-engineered from the f_conffiles() dpkg function in
-      # lib/dpkg/fields.c.
-      pair = line.rsplit(' ', 1)
-      if len(pair) != 2:
-        print >> sys.stderr, "Malformed line in Conffiles field: " + line
-        continue
-      obsolete = pair[1] == "obsolete"
-      if obsolete:
-        pair = pair[0].rsplit(' ', 1)
-        if len(pair) != 2:
-          print >> sys.stderr, "Malformed line in Conffiles field: " + line
+      # The lines in the Conffiles field all start with a space, while lines
+      # in the binary:Package field all start with a non-space.
+      if line[0] != ' ':
+        # Next package.
+        package = line
+      else:
+        # Next conffile in current package.
+        if not package:
+          # Got conffile line before first package line. Should not happen.
+          print >> sys.stderr, ("Got malformed line in dpkg-query output: " +
+              line)
           continue
-      filename = pair[0][1:]
-      md5sum = pair[1]
-      if md5sum == "newconffile":
-        # It's not clear what this means or why it occurs.
-        print ("Warning: Ignoring Conffiles line with hash of \"newconffile\": "
-               + line)
-        continue
-      if len(md5sum) != 32:
-        print "Warning: Ignoring malformed Conffiles line: " + line
-        continue
-      status = (md5sum, obsolete)
-      # It would be nice to verify here that we don't have a conflicting status
-      # already, but we often do. :/
-      self.__conffiles[filename] = status
+        # This is reverse-engineered from the f_conffiles() dpkg function in
+        # lib/dpkg/fields.c.
+        pair = line.rsplit(' ', 1)
+        if len(pair) != 2:
+          _bad_conffiles_line(package, line)
+          continue
+        obsolete = pair[1] == "obsolete"
+        if obsolete:
+          pair = pair[0].rsplit(' ', 1)
+          if len(pair) != 2:
+            _bad_conffiles_line(package, line)
+            continue
+        normpath = pair[0][1:]
+        if not self.__path_filter.includes(normpath):
+          continue
+        md5sum = pair[1]
+        if md5sum == "newconffile":
+          # It's not clear what this means or why it occurs.
+          print ("Warning: Ignoring Conffiles line for package %s with hash of "
+              "\"newconffile\": %s" % (package, line))
+          continue
+        if len(md5sum) != 32:
+          _bad_conffiles_line(package, line)
+          continue
+        status = (md5sum, obsolete)
+        pkg_info = self.__get_node(normpath, True)._get_package_info(package)
+        if pkg_info._conffile_status:
+          print >> sys.stderr, (
+              "Got redundant dpkg-query output for file %s in package %s: %s" %
+              (normpath, package, line))
+        pkg_info._conffile_status = status
+    if p.wait():
+      print >> sys.stderr, ("dpkg-query failed with exit status %s" %
+          p.returncode)
 
-  def is_conffile(self, normpath):
-    return normpath in self.__conffiles
+  def __get_node(self, normpath, create):
+    node = self.__root
+    for component in _path_components(normpath):
+      child = node.children().get(component)
+      if not child and create:
+        child = node._add_child(component)
+      node = child
+      if not node:
+        break
+    return node
 
-  def is_obsolete_conffile(self, normpath):
-    if not self.is_conffile(normpath):
-      return False
-    return self.__conffiles[normpath][1]
-
-  def get_md5sum(self, normpath):
-    if not self.is_conffile(normpath):
-      return None
-    return self.__conffiles[normpath][0]
+  def lookup(self, normpath):
+    if not self.__path_filter.includes(normpath):
+      # We didn't load info for this path.
+      raise Exception("Filter excluded path " + normpath)
+    return self.__get_node(normpath, False)

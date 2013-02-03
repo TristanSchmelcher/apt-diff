@@ -65,11 +65,17 @@ def _verify_md5(filename, expected_md5):
 
 def run(input_files, output_file):
   for line in input_files[0]:
-    expected_md5 = line[0:32]
-    filename = line[34:-1]
+    line = line.rstrip('\n')
+    parts = line.split(' ', 2)
+    if len(parts) != 3:
+      print >> sys.stderr, "Invalid input line to md5sum stage: " + line
+      continue
+    pkgname = parts[0]
+    expected_md5 = parts[1]
+    filename = parts[2]
     try:
       if not _verify_md5(filename, expected_md5):
-        print >> output_file, filename
+        output_file.write("%s %s\n" % (pkgname, filename))
         output_file.flush()
     except Exception, e:
       print >> sys.stderr, "Failed to compute md5sum for %s: %s: %s" % (

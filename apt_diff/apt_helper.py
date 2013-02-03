@@ -19,6 +19,7 @@
 
 import apt
 import apt_pkg
+import os
 import sys
 
 def initialize():
@@ -37,6 +38,9 @@ class AptHelper:
     self.__dep_cache = apt_pkg.GetDepCache(self.__cache)
     self.__src_list = apt_pkg.GetPkgSourceList()
     self.__src_list.ReadMainList()
+
+  def is_installed(self, pkgname):
+    return pkgname in self.__cache and bool(self.__cache[pkgname].CurrentVer)
 
   def fetch_archive(self, pkgname):
     """Downloads the archive for the named package's currently-installed version
@@ -67,7 +71,8 @@ class AptHelper:
       else:
         # Package is not installed. Diff against the version that would be
         # installed if the user were to install the package.
-        if not self.__dep_cache.GetCandidateVer(pkg):
+        ver = self.__dep_cache.GetCandidateVer(pkg)
+        if not ver:
           print >> sys.stderr, ("Can't fetch package %s because it is not "
               "installed and there is no installation candidate available in "
               "the archives" % pkgname)
@@ -79,13 +84,28 @@ class AptHelper:
       # ResultFailed even when everything works.
       pm.GetArchives(fetcher, self.__src_list, self.__pkg_records)
       fetcher.Run()
-      if len(fetcher.Items) != 1:  # Should only be one archive to download
-        raise Exception("Internal error")
-      if fetcher.Items[0].Status != fetcher.Items[0].StatDone:
-        print >> sys.stderr, ("Failed to fetch package %s: %s" %
-            (pkgname, fetcher.Items[0].ErrorText))
-        return None
-      return fetcher.Items[0].DestFile
+      # There may be multiple items in the case of a multi-arch package where
+      # both architectures are installed (they must be reinstalled in tandem).
+      # Scan for the one we want.
+      for item in fetcher.Items:
+        if item.DestFile:
+          filename = os.path.basename(item.DestFile)
+          parts = filename.rsplit(".", 1)
+          if len(parts) != 2:
+            raise Exception("Unrecognized package file name format " + filename)
+          parts = parts[0].split("_")
+          if len(parts) != 3:
+            raise Exception("Unrecognized package file name format " + filename)
+          if parts[0] == pkg.Name and parts[2] == ver.Arch:
+            # Found it.
+            if item.Status != apt_pkg.AcquireItem.StatDone:
+              print >> sys.stderr, ("Failed to fetch package %s: %s" %
+                  (pkgname, item.ErrorText))
+              return None
+            return item.DestFile
+      # We didn't find any downloaded file that looks like the package.
+      raise Exception("Couldn't find package file for %s in fetcher items list"
+          % pkgname)
     except Exception, e:
       print >> sys.stderr, "Failed to fetch package %s: %s: %s" % (pkgname,
           type(e), e)

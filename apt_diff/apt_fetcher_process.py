@@ -21,13 +21,11 @@ import pollingtools
 import sys
 
 class AptFetcher:
-  def __init__(self, apt_helper, tree):
+  def __init__(self, apt_helper):
     self.__apt_helper = apt_helper
-    self.__tree = tree
+    self.__pkg_paths = {}
 
-  def __fetch_owning_package(self, filename):
-    node = self.__tree.lookup(filename)[1]
-    pkgname = node.pkgname()
+  def __fetch_package(self, pkgname, filename):
     if pkgname not in self.__pkg_paths:
       # Haven't downloaded this package archive yet. Get it now.
       path = self.__apt_helper.fetch_archive(pkgname)
@@ -51,13 +49,17 @@ class AptFetcher:
 
   def __on_check_files(self, source, lines):
     for line in lines.splitlines():
-      # The input is a list of files that need to be checked.
-      self.__fetch_owning_package(line)
+      parts = line.split(' ', 1)
+      if len(parts) != 2:
+        print >> sys.stderr, "Invalid input line to APT fetch stage: " + line
+        continue
+      pkgname = parts[0]
+      filename = parts[1]
+      self.__fetch_package(pkgname, filename)
 
   def run(self, input_files, output_file):
     failed_md5sums_input_file = input_files[0]
     missing_md5sums_input_file = input_files[1]
-    self.__pkg_paths = {}
     self.__output_file = output_file
     poller = pollingtools.Poller()
     pollingtools.LineSource(failed_md5sums_input_file, poller,
