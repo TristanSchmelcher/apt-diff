@@ -8,7 +8,7 @@ Standards-Version: 3.8.4
 Package: apt-diff
 Homepage: https://github.com/TristanSchmelcher/apt-diff
 Architecture: all
-Depends: ${python:Depends}, ${misc:Depends}, python-apt
+Depends: ${python:Depends}, ${misc:Depends}, python-apt (>= 0.7.100)
 Description: Diff filesystem content against the APT installation sources
  A command-line APT tool to compute a textual diff for any local modifications
  to packaged files.
