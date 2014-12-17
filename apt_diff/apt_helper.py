@@ -25,28 +25,28 @@ import sys
 def initialize():
   """Initialize the apt_pkg module. Must be called before using anything else in
      this class."""
-  apt_pkg.InitConfig()
-  apt_pkg.InitSystem()
+  apt_pkg.init_config()
+  apt_pkg.init_system()
 
 def set_option(name, value):
   """Set an arbitrary APT option."""
-  apt_pkg.Config.Set(name, value)
+  apt_pkg.config.set(name, value)
 
 class AptHelper:
   """Wrapper for the APT cache's state and package downloading capability."""
 
   def __init__(self):
-    # Have to explicitly create an unused OpProgress or else GetCache()
+    # Have to explicitly create an unused OpProgress or else Cache()
     # does text progress logging by default.
-    self.__cache = apt_pkg.GetCache(apt.progress.OpProgress())
-    self.__pkg_records = apt_pkg.GetPkgRecords(self.__cache)
-    self.__dep_cache = apt_pkg.GetDepCache(self.__cache)
-    self.__src_list = apt_pkg.GetPkgSourceList()
-    self.__src_list.ReadMainList()
+    self.__cache = apt_pkg.Cache(apt.progress.base.OpProgress())
+    self.__pkg_records = apt_pkg.PackageRecords(self.__cache)
+    self.__dep_cache = apt_pkg.DepCache(self.__cache)
+    self.__src_list = apt_pkg.SourceList()
+    self.__src_list.read_main_list()
 
   def is_installed(self, pkgname):
     """Checks if the given package is installed."""
-    return pkgname in self.__cache and bool(self.__cache[pkgname].CurrentVer)
+    return pkgname in self.__cache and bool(self.__cache[pkgname].current_ver)
 
   def fetch_archive(self, pkgname):
     """Downloads the archive for the named package's currently-installed version
@@ -56,59 +56,59 @@ class AptHelper:
           "of it in the archives" % pkgname)
       return None
     pkg = self.__cache[pkgname]
-    ver = pkg.CurrentVer
+    ver = pkg.current_ver
     try:
       if ver:
         # Package is installed. Diff against the same version.
         # First check if this version is available in the repo.
         available = False
-        for package_file, _ in ver.FileList:
-          if package_file.NotSource == 0:
+        for package_file, _ in ver.file_list:
+          if package_file.not_source == 0:
             available = True
             break
         if not available:
           # Nope.
           print >> sys.stderr, ("Can't fetch package %s because the installed "
                                 "version (%s) is not available in the archives"
-                                % (pkgname, ver.VerStr))
+                                % (pkgname, ver.ver_str))
           return None
-        self.__dep_cache.SetCandidateVer(pkg, ver)
-        self.__dep_cache.SetReInstall(pkg, True)
+        self.__dep_cache.set_candidate_ver(pkg, ver)
+        self.__dep_cache.set_reinstall(pkg, True)
       else:
         # Package is not installed. Diff against the version that would be
         # installed if the user were to install the package.
-        ver = self.__dep_cache.GetCandidateVer(pkg)
+        ver = self.__dep_cache.get_candidate_ver(pkg)
         if not ver:
           print >> sys.stderr, ("Can't fetch package %s because it is not "
                                 "installed and there is no installation "
                                 "candidate available in the archives" % pkgname)
           return None
-        self.__dep_cache.MarkInstall(pkg, False)
-      fetcher = apt_pkg.GetAcquire()
-      pkg_man = apt_pkg.GetPackageManager(self.__dep_cache)
+        self.__dep_cache.mark_install(pkg, False)
+      fetcher = apt_pkg.Acquire()
+      pkg_man = apt_pkg.PackageManager(self.__dep_cache)
       # Return value from this seems to be meaningless, since I get
       # ResultFailed even when everything works.
-      pkg_man.GetArchives(fetcher, self.__src_list, self.__pkg_records)
-      fetcher.Run()
+      pkg_man.get_archives(fetcher, self.__src_list, self.__pkg_records)
+      fetcher.run()
       # There may be multiple items in the case of a multi-arch package where
       # both architectures are installed (they must be reinstalled in tandem).
       # Scan for the one we want.
-      for item in fetcher.Items:
-        if item.DestFile:
-          filename = os.path.basename(item.DestFile)
+      for item in fetcher.items:
+        if item.destfile:
+          filename = os.path.basename(item.destfile)
           parts = filename.rsplit(".", 1)
           if len(parts) != 2:
             raise Exception("Unrecognized package file name format " + filename)
           parts = parts[0].split("_")
           if len(parts) != 3:
             raise Exception("Unrecognized package file name format " + filename)
-          if parts[0] == pkg.Name and parts[2] == ver.Arch:
+          if parts[0] == pkg.name and parts[2] == ver.arch:
             # Found it.
-            if item.Status != apt_pkg.AcquireItem.StatDone:
+            if item.status != apt_pkg.AcquireItem.STAT_DONE:
               print >> sys.stderr, ("Failed to fetch package %s: %s" %
-                                    (pkgname, item.ErrorText))
+                                    (pkgname, item.error_text))
               return None
-            return item.DestFile
+            return item.destfile
       # We didn't find any downloaded file that looks like the package.
       raise Exception("Couldn't find package file for %s in fetcher items list"
                       % pkgname)
@@ -120,6 +120,6 @@ class AptHelper:
       # Revert the change (so as to not do a cumulative fetch in each
       # iteration).
       if ver:
-        self.__dep_cache.SetReInstall(pkg, False)
+        self.__dep_cache.set_reinstall(pkg, False)
       else:
-        self.__dep_cache.MarkDelete(pkg)
+        self.__dep_cache.mark_delete(pkg)

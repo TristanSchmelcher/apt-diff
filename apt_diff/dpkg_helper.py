@@ -266,8 +266,13 @@ class DpkgHelper:
     # so we ask dpkg-query to add one. Unfortunately this means that an empty
     # entry will become a one-line entry, so we ignore blank lines in the
     # output.
+    # In some dpkg-query versions the architecture-qualified name field is
+    # called PackageSpec, while in others it's called binary:Package.
+    # Non-existent field references expand to the empty string, so we just
+    # concatenate them as in
+    # https://code.launchpad.net/~lool/getlicenses/fix-for-newer-dpkg-query-format/+merge/169508
     p = subprocess.Popen(
-        ["dpkg-query", "-f=${binary:Package}\\n${Conffiles}\\n", "-W"],
+        ["dpkg-query", "-f=${PackageSpec}${binary:Package}\\n${Conffiles}\\n", "-W"],
         stdout=subprocess.PIPE)
     package = None
     for line in p.stdout:

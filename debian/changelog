@@ -1,3 +1,10 @@
+apt-diff (0.9.7) trusty; urgency=low
+
+  * Update to latest python-apt API since the old one has been dropped from recent versions.
+  * Fix incompatibility with latest dpkg-query versions.
+
+ -- Tristan Schmelcher <tristan_schmelcher@alumni.uwaterloo.ca>  Wed, 17 Dec 2014 18:01:22 -0500
+
 apt-diff (0.9.6) precise; urgency=low
 
   * More robust filetype checks.

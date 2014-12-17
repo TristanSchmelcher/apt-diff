@@ -36,7 +36,7 @@ from apt_diff import dpkg_helper
 from apt_diff import launch_helper
 from apt_diff import parallel_md5sums_checker
 
-VERSION = "0.9.6"
+VERSION = "0.9.7"
 
 # Constants for our command-line argument names.
 _PACKAGE = "package"
